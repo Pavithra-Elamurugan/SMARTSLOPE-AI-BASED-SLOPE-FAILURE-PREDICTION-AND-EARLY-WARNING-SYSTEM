@@ -1,0 +1,37 @@
+{
+  "model_name": "RandomForestClassifier",
+  "training_timestamp": "2026-08-24T21:48:28.670513",
+  "total_records": 5000,
+  "train_samples": 4000,
+  "test_samples": 1000,
+  "metrics": {
+    "accuracy": 0.994,
+    "weighted_f1": 0.994,
+    "weighted_precision": 0.994,
+    "weighted_recall": 0.994
+  },
+  "feature_importances": {
+    "rainfall": 0.0935,
+    "soil_moisture": 0.2684,
+    "temperature": 0.0034,
+    "humidity": 0.0038,
+    "ground_vibration": 0.008,
+    "water_level": 0.1463,
+    "tilt": 0.0608,
+    "crack_width": 0.2673,
+    "ground_movement": 0.1452,
+    "slope_angle": 0.0014,
+    "soil_type_Clay Loam": 0.0004,
+    "soil_type_Colluvium": 0.0002,
+    "soil_type_Laterite": 0.0002,
+    "soil_type_Residual Soil": 0.0004,
+    "soil_type_Sandy Loam": 0.0003,
+    "soil_type_Weathered Granite": 0.0003
+  },
+  "artifacts": {
+    "model_file": "smart_slope_model.joblib",
+    "preprocessor_file": "preprocessor.joblib",
+    "label_encoder_file": "label_encoder.joblib",
+    "feature_config_file": "feature_config.json"
+  }
+}

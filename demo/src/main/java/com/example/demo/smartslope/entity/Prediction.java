@@ -28,6 +28,7 @@ import lombok.Setter;
 public class Prediction {
 
     @Id
+    @Column(name = "prediction_id")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
@@ -35,12 +36,24 @@ public class Prediction {
     @JoinColumn(name = "monitoring_site_id", nullable = false)
     private MonitoringSite monitoringSite;
 
+    @Column(name = "site_id")
+    private Long siteId;
+
+    @Column(name = "sensor_id")
+    private Long sensorId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RiskLevel riskLevel;
 
     @Column(nullable = false)
     private Double confidenceScore;
+
+    @Column
+    private Double probability;
+
+    @Column(name = "risk_score")
+    private Double riskScore;
 
     @Column(nullable = false)
     private LocalDateTime predictionTime;

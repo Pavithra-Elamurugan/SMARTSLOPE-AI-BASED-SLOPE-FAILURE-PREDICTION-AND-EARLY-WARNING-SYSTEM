@@ -24,11 +24,13 @@ public class MonitoringSiteDTO {
     @NotBlank(message = "Location is required")
     private String location;
 
+    private String siteType;
     private Double latitude;
     private Double longitude;
     private Double slopeAngle;
     private String soilType;
     private String geologicalCondition;
     private String status;
+    private Long userId;
     private LocalDateTime createdAt;
 }

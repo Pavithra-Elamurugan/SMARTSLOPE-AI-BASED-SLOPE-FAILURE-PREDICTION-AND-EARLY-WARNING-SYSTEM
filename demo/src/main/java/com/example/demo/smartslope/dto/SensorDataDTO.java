@@ -27,5 +27,9 @@ public class SensorDataDTO {
     private Double humidity;
     private Double groundVibration;
     private Double waterLevel;
+    private Double tilt;
+    private Double crackWidth;
+    private Double groundMovement;
+
     private LocalDateTime recordedAt;
 }

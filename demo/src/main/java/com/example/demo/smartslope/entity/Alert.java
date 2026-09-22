@@ -26,6 +26,7 @@ import lombok.Setter;
 public class Alert {
 
     @Id
+    @Column(name = "alert_id")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
@@ -33,8 +34,14 @@ public class Alert {
     @JoinColumn(name = "prediction_id", nullable = false, unique = true)
     private Prediction prediction;
 
+    @Column(name = "site_id")
+    private Long siteId;
+
     @Column(nullable = false)
     private String alertType;
+
+    @Column(name = "severity")
+    private String severity;
 
     @Column(nullable = false, length = 1000)
     private String message;

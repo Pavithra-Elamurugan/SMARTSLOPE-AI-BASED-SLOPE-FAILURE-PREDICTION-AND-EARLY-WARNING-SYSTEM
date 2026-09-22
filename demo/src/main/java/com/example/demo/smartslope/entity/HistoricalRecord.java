@@ -1,5 +1,6 @@
 package com.example.demo.smartslope.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -25,6 +26,7 @@ import lombok.Setter;
 public class HistoricalRecord {
 
     @Id
+    @Column(name = "record_id")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 

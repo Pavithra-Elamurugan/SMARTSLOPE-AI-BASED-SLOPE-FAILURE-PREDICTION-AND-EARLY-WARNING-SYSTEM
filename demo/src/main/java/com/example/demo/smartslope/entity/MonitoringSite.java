@@ -24,6 +24,7 @@ import lombok.Setter;
 public class MonitoringSite {
 
     @Id
+    @Column(name = "site_id")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
@@ -33,12 +34,16 @@ public class MonitoringSite {
     @Column(nullable = false)
     private String location;
 
+    private String siteType;
     private Double latitude;
     private Double longitude;
     private Double slopeAngle;
     private String soilType;
     private String geologicalCondition;
     private String status;
+
+    @Column(name = "user_id")
+    private Long userId;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

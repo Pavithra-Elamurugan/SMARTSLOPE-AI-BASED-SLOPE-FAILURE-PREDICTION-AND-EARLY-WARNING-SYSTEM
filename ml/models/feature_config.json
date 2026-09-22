@@ -1,0 +1,31 @@
+{
+  "numeric_features": [
+    "rainfall",
+    "soil_moisture",
+    "temperature",
+    "humidity",
+    "ground_vibration",
+    "water_level",
+    "tilt",
+    "crack_width",
+    "ground_movement",
+    "slope_angle"
+  ],
+  "categorical_features": [
+    "soil_type"
+  ],
+  "soil_type_categories": [
+    "Clay Loam",
+    "Laterite",
+    "Weathered Granite",
+    "Colluvium",
+    "Sandy Loam",
+    "Residual Soil"
+  ],
+  "target_column": "risk_level",
+  "target_classes": [
+    "HIGH_RISK",
+    "MODERATE_RISK",
+    "SAFE"
+  ]
+}

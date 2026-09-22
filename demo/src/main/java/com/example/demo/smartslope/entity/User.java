@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
@@ -26,11 +27,15 @@ import lombok.Setter;
 public class User {
 
     @Id
+    @Column(name = "user_id")
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "name", nullable = false)
     private String name;
+
+    @Column(name = "full_name")
+    private String fullName;
 
     @Column(nullable = false, unique = true)
     private String email;
@@ -39,18 +44,35 @@ public class User {
     private String password;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "role", nullable = false, columnDefinition = "VARCHAR(50)")
     private Role role;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "requested_role", columnDefinition = "VARCHAR(50)")
+    private Role requestedRole;
+
     private String phoneNumber;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private Boolean active = true;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
+    @PreUpdate
     protected void onCreate() {
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
+        }
+        if (active == null) {
+            active = true;
+        }
+        if (name != null) {
+            fullName = name;
+        } else if (fullName != null) {
+            name = fullName;
         }
     }
 }
