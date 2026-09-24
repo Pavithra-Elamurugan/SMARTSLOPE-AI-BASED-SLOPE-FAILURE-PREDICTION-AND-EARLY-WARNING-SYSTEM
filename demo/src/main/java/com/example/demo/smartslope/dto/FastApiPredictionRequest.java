@@ -42,4 +42,16 @@ public class FastApiPredictionRequest {
 
     @JsonProperty("soil_type")
     private String soilType;
+
+    private Double latitude;
+
+    private Double longitude;
+
+    private Double elevation;
+
+    @JsonProperty("wind_speed")
+    private Double windSpeed;
+
+    @JsonProperty("surface_pressure")
+    private Double surfacePressure;
 }

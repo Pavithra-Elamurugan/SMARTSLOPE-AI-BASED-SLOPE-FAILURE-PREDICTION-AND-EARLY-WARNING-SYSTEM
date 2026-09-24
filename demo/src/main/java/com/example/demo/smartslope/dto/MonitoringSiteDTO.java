@@ -1,5 +1,6 @@
 package com.example.demo.smartslope.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,9 +20,11 @@ public class MonitoringSiteDTO {
     private Long id;
 
     @NotBlank(message = "Site name is required")
+    @JsonAlias({"name", "locationName", "site_name"})
     private String siteName;
 
     @NotBlank(message = "Location is required")
+    @JsonAlias({"address", "locationAddress", "description"})
     private String location;
 
     private String siteType;

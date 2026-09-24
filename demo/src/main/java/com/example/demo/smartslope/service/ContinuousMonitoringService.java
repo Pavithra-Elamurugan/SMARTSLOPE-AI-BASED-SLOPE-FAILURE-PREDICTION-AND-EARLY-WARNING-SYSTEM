@@ -19,29 +19,11 @@ public class ContinuousMonitoringService {
     private final SiteTelemetrySimulatorService simulatorService;
 
     /**
-     * Periodically monitors incoming/latest slope monitoring data across all saved sites.
-     * Evaluates AI/ML risk predictions every 15 seconds continuously using dynamic telemetry.
+     * Automated periodic simulation has been disabled to prevent artificial telemetry mutations.
+     * Monitoring evaluations now rely strictly on real live weather data and verified site parameters.
      */
-    @Scheduled(fixedRate = 15000)
+    // @Scheduled(fixedRate = 15000)
     public void runContinuousMonitoringCycle() {
-        try {
-            List<MonitoringSite> sites = siteRepository.findAll();
-            if (sites.isEmpty()) {
-                return;
-            }
-
-            log.info("[CONTINUOUS MONITORING] Running automated AI risk evaluation for {} site(s)...", sites.size());
-            for (MonitoringSite site : sites) {
-                try {
-                    SensorDataDTO telemetry = simulatorService.generateNextTelemetry(site);
-                    predictionService.evaluateSite(site.getId(), telemetry);
-                } catch (Exception e) {
-                    log.warn("[CONTINUOUS MONITORING] Warning evaluating site #{} ({}): {}",
-                            site.getId(), site.getSiteName(), e.getMessage());
-                }
-            }
-        } catch (Exception e) {
-            log.error("[CONTINUOUS MONITORING] Unexpected error during monitoring cycle: {}", e.getMessage());
-        }
+        log.info("[CONTINUOUS MONITORING] Automated artificial simulation cycle is disabled.");
     }
 }

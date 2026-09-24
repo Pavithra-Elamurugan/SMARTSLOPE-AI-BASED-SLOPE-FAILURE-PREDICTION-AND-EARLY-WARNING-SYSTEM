@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import MonitoringMap from "../components/MonitoringMap";
-import { sitesApi, predictionApi } from "../services/api";
+import { sitesApi, predictionApi, fetchLocationWeather } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
 // --- Haversine Distance Calculation (in meters / km) ---
@@ -41,10 +41,18 @@ export function LocationMonitoringPage() {
   const [loadingSites, setLoadingSites] = useState(true);
   const [predicting, setPredicting] = useState(false);
 
-  // Real-Time Simulation State
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simulatedTelemetry, setSimulatedTelemetry] = useState(null);
-  const simIntervalRef = useRef(null);
+  // Search Location Input State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchingLocation, setSearchingLocation] = useState(false);
+
+  // Open-Meteo Real Weather State
+  const [weatherData, setWeatherData] = useState(null);
+  const [loadingWeather, setLoadingWeather] = useState(false);
+  const [weatherError, setWeatherError] = useState(null);
+  const [lastUpdatedTime, setLastUpdatedTime] = useState(null);
+  const [isMonitoring, setIsMonitoring] = useState(true);
+  const monitoringTimerRef = useRef(null);
+  const lastAlertedRiskRef = useRef(null);
 
   // GPS Real-Time Monitoring State
   const [userGps, setUserGps] = useState({
@@ -54,17 +62,16 @@ export function LocationMonitoringPage() {
     status: "STANDBY", // STANDBY, ACQUIRING, ACTIVE, DENIED, ERROR
     errorMsg: null,
   });
-  const gpsWatchIdRef = useRef(null);
+  const [isAcquiringGps, setIsAcquiringGps] = useState(false);
 
   // Add Location Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [isAcquiringModalGps, setIsAcquiringModalGps] = useState(false);
   const [addForm, setAddForm] = useState({
     name: "",
-    location: "",
     latitude: "",
     longitude: "",
-    siteType: "Rock Slope",
+    slopeType: "Moderate",
   });
   const [addFormErrors, setAddFormErrors] = useState({});
   const [savingSite, setSavingSite] = useState(false);
@@ -76,7 +83,7 @@ export function LocationMonitoringPage() {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
-    }, 4000);
+    }, 4500);
   }, []);
 
   // --- Load Sites on Component Mount ---
@@ -98,7 +105,7 @@ export function LocationMonitoringPage() {
       }
     } catch (err) {
       console.error("Error loading sites:", err);
-      showToast("Failed to fetch monitoring locations", "error");
+      showToast("Failed to fetch saved monitoring sites.", "error");
     } finally {
       setLoadingSites(false);
     }
@@ -114,178 +121,277 @@ export function LocationMonitoringPage() {
     return sites.find((s) => String(s.id) === String(selectedSiteId)) || null;
   }, [sites, selectedSiteId]);
 
-  // --- Load Prediction for Selected Site ---
-  const loadPredictionForSite = useCallback(async (siteId) => {
-    if (!siteId) {
-      setCurrentPrediction(null);
-      return;
-    }
+  // --- Load Weather Data for Coordinates (Real Open-Meteo API) ---
+  const loadWeatherForCoords = useCallback(async (lat, lng) => {
+    if (lat == null || lng == null) return;
+    setLoadingWeather(true);
+    setWeatherError(null);
     try {
-      const res = await predictionApi.getBySiteId(siteId);
-      if (Array.isArray(res) && res.length > 0) {
-        const sorted = [...res].sort(
-          (a, b) => new Date(b.predictionTime || 0) - new Date(a.predictionTime || 0)
-        );
-        setCurrentPrediction(sorted[0]);
-      } else {
-        setCurrentPrediction(null);
-      }
+      const w = await fetchLocationWeather(lat, lng);
+      setWeatherData(w);
+      setLastUpdatedTime(new Date().toLocaleTimeString());
+      return w;
     } catch (err) {
-      console.warn(`No existing prediction for site ${siteId}:`, err);
-      setCurrentPrediction(null);
+      console.warn("Open-Meteo weather fetch error:", err);
+      setWeatherError("Unable to fetch live weather data for coordinates.");
+      const fallback = {
+        rainfall: null,
+        humidity: null,
+        temperature: null,
+        windSpeed: null,
+        surfacePressure: null,
+        soilMoisture: null,
+        elevation: null,
+        condition: "Unavailable",
+        source: "Unavailable",
+      };
+      setWeatherData(fallback);
+      return fallback;
+    } finally {
+      setLoadingWeather(false);
     }
   }, []);
 
+  // --- Real-Time Monitoring & Weather Update Cycle ---
+  const runMonitoringCycle = useCallback(async (siteObj) => {
+    if (!siteObj || siteObj.latitude == null || siteObj.longitude == null) return;
+    try {
+      await loadWeatherForCoords(siteObj.latitude, siteObj.longitude);
+    } catch (err) {
+      console.warn("Monitoring weather refresh error:", err);
+    }
+  }, [loadWeatherForCoords]);
+
+  // Real-Time Controlled Interval Hook (Prevents duplicate intervals and does NOT run auto prediction)
   useEffect(() => {
-    if (selectedSiteId) {
-      loadPredictionForSite(selectedSiteId);
+    if (monitoringTimerRef.current) {
+      clearInterval(monitoringTimerRef.current);
+      monitoringTimerRef.current = null;
     }
-  }, [selectedSiteId, loadPredictionForSite]);
 
-  // Initial Base Telemetry for Selected Site
-  const baseTelemetry = useMemo(() => {
-    if (!selectedSite) {
-      return {
-        rainfall: 0.0,
-        groundVibration: 0.02,
-        tilt: 0.1,
-        soilMoisture: 28.5,
-        crackWidth: 0.2,
-        temperature: 24.5,
-      };
-    }
-    return {
-      rainfall: selectedSite.rainfall != null ? Number(selectedSite.rainfall) : 12.4,
-      groundVibration: selectedSite.groundVibration != null ? Number(selectedSite.groundVibration) : 0.04,
-      tilt: selectedSite.tilt != null ? Number(selectedSite.tilt) : 0.45,
-      soilMoisture: selectedSite.soilMoisture != null ? Number(selectedSite.soilMoisture) : 42.0,
-      crackWidth: selectedSite.crackWidth != null ? Number(selectedSite.crackWidth) : 0.8,
-      temperature: selectedSite.temperature != null ? Number(selectedSite.temperature) : 26.2,
-    };
-  }, [selectedSite]);
+    if (!isMonitoring || !selectedSite) return;
 
-  // Sync telemetry when site changes or when not simulating
-  useEffect(() => {
-    if (!isSimulating) {
-      setSimulatedTelemetry(baseTelemetry);
-    }
-  }, [baseTelemetry, isSimulating]);
+    runMonitoringCycle(selectedSite);
 
-  // --- Controlled Simulation Mode (3s Refresh) ---
-  useEffect(() => {
-    if (isSimulating) {
-      simIntervalRef.current = setInterval(() => {
-        setSimulatedTelemetry((prev) => {
-          const current = prev || baseTelemetry;
-          const deltaRain = +(Math.random() * 2.5 - 0.5).toFixed(1);
-          const deltaVib = +(Math.random() * 0.03 - 0.01).toFixed(3);
-          const deltaTilt = +(Math.random() * 0.05 - 0.01).toFixed(2);
-          const deltaMoist = +(Math.random() * 1.2 - 0.3).toFixed(1);
-          const deltaCrack = +(Math.random() * 0.04 - 0.01).toFixed(2);
-          const deltaTemp = +(Math.random() * 0.4 - 0.2).toFixed(1);
-
-          return {
-            rainfall: Math.max(0, +(current.rainfall + deltaRain).toFixed(1)),
-            groundVibration: Math.max(0, +(current.groundVibration + deltaVib).toFixed(3)),
-            tilt: Math.max(0, +(current.tilt + deltaTilt).toFixed(2)),
-            soilMoisture: Math.min(100, Math.max(0, +(current.soilMoisture + deltaMoist).toFixed(1))),
-            crackWidth: Math.max(0, +(current.crackWidth + deltaCrack).toFixed(2)),
-            temperature: +(current.temperature + deltaTemp).toFixed(1),
-          };
-        });
-      }, 3000);
-    } else {
-      if (simIntervalRef.current) {
-        clearInterval(simIntervalRef.current);
-        simIntervalRef.current = null;
-      }
-    }
+    monitoringTimerRef.current = setInterval(() => {
+      runMonitoringCycle(selectedSite);
+    }, 30000);
 
     return () => {
-      if (simIntervalRef.current) {
-        clearInterval(simIntervalRef.current);
-        simIntervalRef.current = null;
+      if (monitoringTimerRef.current) {
+        clearInterval(monitoringTimerRef.current);
+        monitoringTimerRef.current = null;
       }
     };
-  }, [isSimulating, baseTelemetry]);
+  }, [selectedSite, isMonitoring, runMonitoringCycle]);
 
-  // --- Real GPS Geolocation Watcher ---
-  const startGpsMonitoring = useCallback(() => {
+  // When selected site changes, clear stale prediction and load weather
+  useEffect(() => {
+    if (selectedSiteId) {
+      setCurrentPrediction(null);
+      const siteObj = sites.find((s) => String(s.id) === String(selectedSiteId));
+      if (siteObj && siteObj.latitude != null && siteObj.longitude != null) {
+        loadWeatherForCoords(siteObj.latitude, siteObj.longitude);
+      }
+    }
+  }, [selectedSiteId, sites, loadWeatherForCoords]);
+
+  // --- Toggle Monitoring Handler ---
+  const handleToggleMonitoring = () => {
+    if (isMonitoring) {
+      setIsMonitoring(false);
+      if (monitoringTimerRef.current) {
+        clearInterval(monitoringTimerRef.current);
+        monitoringTimerRef.current = null;
+      }
+      showToast("Real-time location monitoring paused.", "info");
+    } else {
+      setIsMonitoring(true);
+      showToast("Real-time location monitoring started.", "success");
+    }
+  };
+
+  // --- FIX USE CURRENT GPS FUNCTIONALITY ---
+  const handleUseCurrentGps = (isModal = false) => {
     if (!navigator.geolocation) {
-      setUserGps((prev) => ({
-        ...prev,
-        status: "ERROR",
-        errorMsg: "Geolocation is not supported by your browser.",
-      }));
+      const errMsg = "Geolocation is not supported by your browser.";
+      showToast(errMsg, "error");
       return;
     }
 
-    setUserGps((prev) => ({ ...prev, status: "ACQUIRING", errorMsg: null }));
-
-    if (gpsWatchIdRef.current) {
-      navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+    if (isModal) {
+      setIsAcquiringModalGps(true);
+    } else {
+      setIsAcquiringGps(true);
+      setUserGps((prev) => ({ ...prev, status: "ACQUIRING", errorMsg: null }));
     }
 
-    gpsWatchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const latStr = latitude.toFixed(6);
+        const lngStr = longitude.toFixed(6);
+
         setUserGps({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: Math.round(pos.coords.accuracy),
+          lat: latitude,
+          lng: longitude,
+          accuracy: Math.round(accuracy),
           status: "ACTIVE",
           errorMsg: null,
         });
+
+        // Always update addForm when GPS button is clicked (modal or panel)
+        setAddForm((prev) => ({
+          ...prev,
+          latitude: latStr,
+          longitude: lngStr,
+        }));
+        setAddFormErrors((prev) => ({ ...prev, latitude: null, longitude: null }));
+
+        if (isModal) {
+          setIsAcquiringModalGps(false);
+        } else {
+          setIsAcquiringGps(false);
+        }
+
+        // Reverse Geocode place name if available
+        let detectedName = "Current GPS Location";
+        try {
+          const rev = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+          );
+          if (rev.ok) {
+            const data = await rev.json();
+            if (data && data.display_name) {
+              detectedName = data.address?.suburb || data.address?.town || data.address?.city || data.address?.county || "GPS Location";
+            }
+          }
+        } catch (ignored) {}
+
+        setAddForm((prev) => ({
+          ...prev,
+          name: prev.name.trim() ? prev.name : detectedName,
+        }));
+
+        setCurrentPrediction(null);
+        await loadWeatherForCoords(latitude, longitude);
+        showToast(`GPS Position acquired: ${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E (±${Math.round(accuracy)}m)`, "success");
       },
       (err) => {
-        let msg = "GPS Location error.";
+        if (isModal) setIsAcquiringModalGps(false);
+        else setIsAcquiringGps(false);
+
+        let msg = "Unable to access GPS location.";
         if (err.code === err.PERMISSION_DENIED) {
-          msg = "GPS Permission denied by user/browser.";
+          msg = "GPS location permission was denied by your browser settings.";
         } else if (err.code === err.POSITION_UNAVAILABLE) {
-          msg = "GPS Position unavailable.";
+          msg = "GPS position is unavailable on your device.";
         } else if (err.code === err.TIMEOUT) {
-          msg = "GPS Request timed out.";
+          msg = "GPS location request timed out. Please try again.";
         }
+
         setUserGps((prev) => ({
           ...prev,
           status: err.code === err.PERMISSION_DENIED ? "DENIED" : "ERROR",
           errorMsg: msg,
         }));
+        showToast(msg, "error");
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 5000,
+        maximumAge: 0,
       }
     );
-  }, []);
+  };
 
-  useEffect(() => {
-    startGpsMonitoring();
-    return () => {
-      if (gpsWatchIdRef.current) {
-        navigator.geolocation.clearWatch(gpsWatchIdRef.current);
-        gpsWatchIdRef.current = null;
+  // --- Search Location Handler ---
+  const handleSearchLocation = async (e) => {
+    if (e) e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) {
+      showToast("Please enter a location name to search.", "error");
+      return;
+    }
+
+    setSearchingLocation(true);
+
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`
+      );
+      if (!res.ok) throw new Error("Search service returned an error.");
+      const results = await res.json();
+
+      if (results && results.length > 0) {
+        const place = results[0];
+        const latNum = parseFloat(place.lat);
+        const lngNum = parseFloat(place.lon);
+        const placeName = place.display_name.split(",")[0] || query;
+
+        setUserGps({
+          lat: latNum,
+          lng: lngNum,
+          accuracy: null,
+          status: "ACTIVE",
+          errorMsg: null,
+        });
+
+        setCurrentPrediction(null);
+        await loadWeatherForCoords(latNum, lngNum);
+        showToast(`Location found: ${placeName} (${latNum.toFixed(4)}°N, ${lngNum.toFixed(4)}°E)`, "success");
+      } else {
+        showToast(`No coordinates found for "${query}". Try searching another location name.`, "error");
       }
-    };
-  }, [startGpsMonitoring]);
+    } catch (err) {
+      console.error("Search error:", err);
+      showToast("Failed to search location.", "error");
+    } finally {
+      setSearchingLocation(false);
+    }
+  };
 
-  // --- Run Prediction / Analysis ---
+  // --- Run AI Prediction / Analysis ---
   const handleRunPrediction = async () => {
-    if (!selectedSiteId) {
-      showToast("Please select a monitoring location first.", "error");
+    const activeLat = userGps.lat != null ? userGps.lat : (selectedSite?.latitude != null ? Number(selectedSite.latitude) : null);
+    const activeLng = userGps.lng != null ? userGps.lng : (selectedSite?.longitude != null ? Number(selectedSite.longitude) : null);
+
+    if (activeLat == null || activeLng == null) {
+      showToast("Please select a monitoring location or use GPS first.", "error");
       return;
     }
 
     setPredicting(true);
 
     try {
-      const payload = simulatedTelemetry || baseTelemetry;
-      const result = await predictionApi.evaluateSite(selectedSiteId, payload);
+      const snapshot = {
+        monitoring_site_id: selectedSiteId ? Number(selectedSiteId) : 1,
+        latitude: activeLat,
+        longitude: activeLng,
+        rainfall: weatherData?.rainfall != null ? Number(weatherData.rainfall) : 0.0,
+        rainfall24h: weatherData?.rainfall24h != null ? Number(weatherData.rainfall24h) : 0.0,
+        rainfall72h: weatherData?.rainfall72h != null ? Number(weatherData.rainfall72h) : 0.0,
+        soilMoisture: weatherData?.soilMoisture != null ? Number(weatherData.soilMoisture) : 0.0,
+        temperature: weatherData?.temperature != null ? Number(weatherData.temperature) : 0.0,
+        humidity: weatherData?.humidity != null ? Number(weatherData.humidity) : 0.0,
+        windSpeed: weatherData?.windSpeed != null ? Number(weatherData.windSpeed) : 0.0,
+        surfacePressure: weatherData?.surfacePressure != null ? Number(weatherData.surfacePressure) : 0.0,
+        elevation: weatherData?.elevation != null ? Number(weatherData.elevation) : (selectedSite?.elevation != null ? Number(selectedSite.elevation) : 0.0),
+        slopeAngle: weatherData?.demSlopeAngle != null ? Number(weatherData.demSlopeAngle) : (selectedSite?.slopeAngle != null ? Number(selectedSite.slopeAngle) : 0.0),
+        soilType: selectedSite?.soilType || selectedSite?.soil_type || "Residual Soil",
+      };
+
+      const result = await predictionApi.evaluateSite(selectedSiteId || 1, snapshot);
       setCurrentPrediction(result);
-      showToast(`Prediction updated for ${selectedSite?.name || "selected location"}!`, "success");
+      showToast(`AI prediction updated for ${selectedSite?.name || selectedSite?.siteName || "location"}!`, "success");
     } catch (err) {
       console.error("Prediction evaluation error:", err);
-      showToast("Failed to run prediction evaluation.", "error");
+      const detailMsg = err.response?.data?.detail 
+        || err.response?.data?.message 
+        || err.customMessage 
+        || err.message 
+        || "Failed to connect to FastAPI microservice.";
+      showToast(`Prediction failed: ${detailMsg}`, "error");
     } finally {
       setPredicting(false);
     }
@@ -295,45 +401,22 @@ export function LocationMonitoringPage() {
   const handleOpenAddModal = () => {
     setAddForm({
       name: "",
-      location: "",
-      latitude: selectedSite?.latitude ? String(selectedSite.latitude) : "11.35300",
-      longitude: selectedSite?.longitude ? String(selectedSite.longitude) : "76.79500",
-      siteType: "Rock Slope",
+      latitude: userGps.lat != null ? userGps.lat.toFixed(6) : (selectedSite?.latitude != null ? String(selectedSite.latitude) : ""),
+      longitude: userGps.lng != null ? userGps.lng.toFixed(6) : (selectedSite?.longitude != null ? String(selectedSite.longitude) : ""),
+      slopeType: "Moderate",
     });
     setAddFormErrors({});
     setShowAddModal(true);
   };
 
-  const handleUseGpsInModal = () => {
-    if (!navigator.geolocation) {
-      showToast("Geolocation is not supported by your browser.", "error");
-      return;
-    }
-    setIsAcquiringModalGps(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setAddForm((prev) => ({
-          ...prev,
-          latitude: pos.coords.latitude.toFixed(6),
-          longitude: pos.coords.longitude.toFixed(6),
-        }));
-        setIsAcquiringModalGps(false);
-        showToast("Auto-filled coordinates from current GPS position!", "info");
-      },
-      () => {
-        setIsAcquiringModalGps(false);
-        showToast("Could not access GPS coordinates. You can enter manually.", "error");
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  };
-
   const handleSaveLocation = async (e) => {
     e.preventDefault();
+    if (savingSite) return;
     const errors = {};
 
-    if (!addForm.name.trim()) errors.name = "Location name is required.";
-    if (!addForm.location.trim()) errors.location = "Address/Description is required.";
+    const trimmedName = addForm.name.trim();
+
+    if (!trimmedName) errors.name = "Location name is required.";
     const latNum = parseFloat(addForm.latitude);
     const lngNum = parseFloat(addForm.longitude);
 
@@ -353,26 +436,38 @@ export function LocationMonitoringPage() {
     setAddFormErrors({});
 
     try {
+      const slopeAngleMap = {
+        "Normal Flat Surface": 5.0,
+        "Gentle": 15.0,
+        "Moderate": 30.0,
+        "Steep": 45.0,
+        "Very Steep": 60.0,
+      };
+
       const payload = {
-        name: addForm.name.trim(),
-        location: addForm.location.trim(),
+        name: trimmedName,
+        siteName: trimmedName,
+        location: trimmedName,
         latitude: latNum,
         longitude: lngNum,
-        siteType: addForm.siteType,
+        siteType: addForm.slopeType || "Moderate",
+        slopeAngle: slopeAngleMap[addForm.slopeType] || 30.0,
+        soilType: "Residual Soil",
         status: "ACTIVE",
       };
 
       const newSite = await sitesApi.create(payload);
-      showToast(`Location "${newSite.name || addForm.name}" created successfully!`, "success");
+      showToast(`Location "${newSite.name || trimmedName}" saved successfully!`, "success");
       setShowAddModal(false);
 
       await loadSites();
       if (newSite && newSite.id) {
         setSelectedSiteId(newSite.id);
+        loadWeatherForCoords(latNum, lngNum);
       }
     } catch (err) {
       console.error("Error creating location:", err);
-      const serverMsg = err.response?.data?.message || "Failed to create location.";
+      const serverMsg = err.response?.data?.message || err.response?.data?.siteName || "Failed to save location.";
       setAddFormErrors({ server: serverMsg });
       showToast(serverMsg, "error");
     } finally {
@@ -403,60 +498,16 @@ export function LocationMonitoringPage() {
     return { label: "SAFE", color: "#34d399", tone: "safe", bg: "rgba(16, 185, 129, 0.2)" };
   }, [currentPrediction]);
 
-  // Sensors list for bottom compact grid
-  const sensorDisplayList = useMemo(() => {
-    const data = simulatedTelemetry || baseTelemetry;
-    return [
-      {
-        id: "rain",
-        label: "Rainfall",
-        value: `${data.rainfall} mm`,
-        status: data.rainfall > 50 ? "Critical" : data.rainfall > 20 ? "Elevated" : "Normal",
-        statusTone: data.rainfall > 50 ? "danger" : data.rainfall > 20 ? "warning" : "safe",
-        icon: "🌧️",
-      },
-      {
-        id: "vibration",
-        label: "Ground Vibration",
-        value: `${data.groundVibration} g`,
-        status: data.groundVibration > 0.1 ? "Elevated" : "Normal",
-        statusTone: data.groundVibration > 0.1 ? "warning" : "safe",
-        icon: "📳",
-      },
-      {
-        id: "tilt",
-        label: "Tilt Angle",
-        value: `${data.tilt}°`,
-        status: data.tilt > 2.0 ? "Critical" : data.tilt > 0.8 ? "Elevated" : "Normal",
-        statusTone: data.tilt > 2.0 ? "danger" : data.tilt > 0.8 ? "warning" : "safe",
-        icon: "📐",
-      },
-      {
-        id: "moisture",
-        label: "Soil Moisture",
-        value: `${data.soilMoisture}%`,
-        status: data.soilMoisture > 75 ? "Critical" : data.soilMoisture > 50 ? "Elevated" : "Normal",
-        statusTone: data.soilMoisture > 75 ? "danger" : data.soilMoisture > 50 ? "warning" : "safe",
-        icon: "💧",
-      },
-      {
-        id: "crack",
-        label: "Crack Width",
-        value: `${data.crackWidth} mm`,
-        status: data.crackWidth > 3.0 ? "Critical" : data.crackWidth > 1.2 ? "Elevated" : "Normal",
-        statusTone: data.crackWidth > 3.0 ? "danger" : data.crackWidth > 1.2 ? "warning" : "safe",
-        icon: "🔍",
-      },
-      {
-        id: "temp",
-        label: "Temperature",
-        value: `${data.temperature}°C`,
-        status: "Normal",
-        statusTone: "safe",
-        icon: "🌡️",
-      },
-    ];
-  }, [simulatedTelemetry, baseTelemetry]);
+  // Active map coordinates
+  const activeMapCoords = useMemo(() => {
+    if (userGps.lat && userGps.lng) {
+      return { lat: userGps.lat, lng: userGps.lng };
+    }
+    if (selectedSite && selectedSite.latitude != null && selectedSite.longitude != null) {
+      return { lat: selectedSite.latitude, lng: selectedSite.longitude };
+    }
+    return null;
+  }, [userGps, selectedSite]);
 
   return (
     <div className="command-app">
@@ -474,299 +525,464 @@ export function LocationMonitoringPage() {
           </div>
         )}
 
-        {/* --- Top Dashboard Controls Header Bar --- */}
-        <div className="loc-header-bar">
-          <div className="loc-header-info">
-            <h2>Location Monitoring Control Panel</h2>
-            <p>Real-time AI slope hazard surveillance & GPS location intelligence</p>
-          </div>
-
-          <div className="loc-header-actions">
-            {/* Selected Location Selector */}
-            <div className="loc-select-wrapper">
-              <label htmlFor="site-select">LOCATION:</label>
-              <select
-                id="site-select"
-                value={selectedSiteId || ""}
-                onChange={(e) => setSelectedSiteId(e.target.value)}
-                disabled={loadingSites || sites.length === 0}
-                className="loc-select-input"
-              >
-                {loadingSites ? (
-                  <option value="">Loading locations...</option>
-                ) : sites.length === 0 ? (
-                  <option value="">No locations available</option>
-                ) : (
-                  sites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name || s.siteName} ({s.siteType || "Slope"})
-                    </option>
-                  ))
-                )}
-              </select>
+        <div className="loc-monitoring-container">
+          {/* ========================================================================= */}
+          {/* SECTION 1 — LOCATION MONITORING HEADER                                    */}
+          {/* ========================================================================= */}
+          <div className="loc-section-header">
+            <div className="loc-header-info">
+              <h2>Location Monitoring Control Panel</h2>
+              <p>Real-time AI slope hazard surveillance & GPS location intelligence</p>
             </div>
-
-            {/* Simulation Mode Toggle Button */}
-            <button
-              onClick={() => {
-                const nextState = !isSimulating;
-                setIsSimulating(nextState);
-                showToast(
-                  nextState ? "Simulation Mode Started (3s interval)" : "Simulation Mode Stopped",
-                  nextState ? "info" : "default"
-                );
-              }}
-              className={`btn-sim ${isSimulating ? "btn-sim-active" : ""}`}
-              title="Toggle 3-second live sensor simulation mode"
-            >
-              <span className="sim-dot"></span>
-              {isSimulating ? "Stop Simulation" : "Start Simulation"}
-            </button>
-
-            {/* Add Location Button (ADMIN / ENGINEER) */}
-            {canManageLocations && (
-              <button onClick={handleOpenAddModal} className="btn-add-loc">
-                <span>+</span> Add Location
-              </button>
-            )}
           </div>
-        </div>
 
-        {/* --- Main One-Screen Compact Dashboard Grid --- */}
-        <div className="loc-dashboard-grid">
-          {/* LEFT COLUMN: Advanced Real GPS Map & Location Metadata */}
-          <div className="loc-panel loc-map-panel">
-            <div className="panel-title-bar">
-              <div className="panel-title">
-                <span className="icon">🗺️</span>
-                <div>
-                  <h3>Advanced GPS Monitoring</h3>
-                  <small>Live Geographic Positioning System</small>
-                </div>
+          {/* ========================================================================= */}
+          {/* SECTION 2 — LOCATION SETUP (NEAT CARD)                                    */}
+          {/* ========================================================================= */}
+          <div className="loc-setup-card">
+            <div className="loc-setup-header">
+              <span className="icon">📍</span>
+              <h3>Target Location Selection & Search</h3>
+            </div>
+            <div className="loc-setup-controls">
+              {/* 1. Location Dropdown Selector */}
+              <div className="loc-control-item loc-select-group">
+                <label htmlFor="site-select">LOCATION:</label>
+                <select
+                  id="site-select"
+                  value={selectedSiteId || ""}
+                  onChange={(e) => setSelectedSiteId(e.target.value)}
+                  disabled={loadingSites || sites.length === 0}
+                  className="loc-select-input"
+                >
+                  {loadingSites ? (
+                    <option value="">Loading locations...</option>
+                  ) : sites.length === 0 ? (
+                    <option value="">No locations available</option>
+                  ) : (
+                    sites.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name || s.siteName} ({s.siteType || "Slope"})
+                      </option>
+                    ))
+                  )}
+                </select>
               </div>
 
-              {/* GPS Actions */}
-              <div className="gps-btn-group">
+              {/* 2 & 3. Search place input + Search button */}
+              <form onSubmit={handleSearchLocation} className="loc-search-form">
+                <input
+                  type="text"
+                  placeholder="Search place..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="loc-search-input"
+                />
                 <button
-                  onClick={startGpsMonitoring}
-                  className="btn-gps-small"
-                  title="Refresh browser GPS location"
+                  type="submit"
+                  disabled={searchingLocation}
+                  className="btn-loc-search"
                 >
-                  📡 Refresh GPS
+                  {searchingLocation ? "..." : "🔍 Search"}
                 </button>
-              </div>
-            </div>
+              </form>
 
-            {/* Leaflet Map Integration */}
-            <div className="loc-map-container">
-              <MonitoringMap
-                sites={sites}
-                filter="ALL"
-                onSelect={(site) => setSelectedSiteId(site.id)}
-                clickedCoords={
-                  userGps.lat && userGps.lng
-                    ? { lat: userGps.lat, lng: userGps.lng }
-                    : selectedSite
-                    ? { lat: selectedSite.latitude, lng: selectedSite.longitude }
-                    : null
-                }
-              />
-            </div>
+              {/* 4. Use Current GPS button */}
+              <button
+                type="button"
+                onClick={() => handleUseCurrentGps(false)}
+                disabled={isAcquiringGps}
+                className="btn-use-gps"
+              >
+                📡 {isAcquiringGps ? "Acquiring GPS..." : "Use Current GPS"}
+              </button>
 
-            {/* GPS Metadata Strip */}
-            <div className="gps-metadata-strip">
-              <div className="gps-meta-item">
-                <span className="meta-label">Selected Location:</span>
-                <span className="meta-val">
-                  {selectedSite ? `${selectedSite.latitude?.toFixed(4)}°N, ${selectedSite.longitude?.toFixed(4)}°E` : "None"}
-                </span>
-              </div>
+              {/* 5. Start / Stop Real-Time Monitoring button */}
+              <button
+                type="button"
+                onClick={handleToggleMonitoring}
+                className={`btn-monitoring-toggle ${isMonitoring ? "stop" : "start"}`}
+              >
+                {isMonitoring ? "🛑 Stop Monitoring" : "▶️ Start Monitoring"}
+              </button>
 
-              <div className="gps-meta-item">
-                <span className="meta-label">Current GPS Position:</span>
-                <span className="meta-val">
-                  {userGps.lat != null
-                    ? `${userGps.lat.toFixed(4)}°N, ${userGps.lng.toFixed(4)}°E`
-                    : userGps.status === "DENIED"
-                    ? "Permission Denied"
-                    : userGps.status === "ACQUIRING"
-                    ? "Acquiring..."
-                    : "Unavailable"}
-                </span>
-              </div>
-
-              <div className="gps-meta-item">
-                <span className="meta-label">GPS Accuracy:</span>
-                <span className="meta-val">
-                  {userGps.accuracy != null ? `±${userGps.accuracy} m` : "N/A"}
-                </span>
-              </div>
-
-              <div className="gps-meta-item">
-                <span className="meta-label">Distance to Location:</span>
-                <span className="meta-val highlight-dist">
-                  {computedDistance || "N/A"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN: AI Prediction & Risk Analytics Panel */}
-          <div className="loc-panel loc-pred-panel">
-            <div className="panel-title-bar">
-              <div className="panel-title">
-                <span className="icon">🧠</span>
-                <div>
-                  <h3>AI Risk Prediction Engine</h3>
-                  <small>Physics & ML Slope Failure Assessment</small>
-                </div>
-              </div>
-
-              {canAnalyzePrediction && (
-                <button
-                  onClick={handleRunPrediction}
-                  disabled={predicting || !selectedSiteId}
-                  className="btn-predict-action"
-                >
-                  {predicting ? "Analyzing..." : "Predict / Analyze"}
+              {/* 6. Add Location button */}
+              {canManageLocations && (
+                <button type="button" onClick={handleOpenAddModal} className="btn-add-loc">
+                  <span>+</span> Add Location
                 </button>
               )}
             </div>
-
-            {/* Prediction Body / Empty State */}
-            {!currentPrediction && !predicting ? (
-              <div className="pred-empty-state">
-                <div className="empty-icon">📊</div>
-                <h4>No Prediction Evaluated Yet</h4>
-                <p>
-                  No AI risk evaluation has been computed for{" "}
-                  <strong>{selectedSite?.name || "this location"}</strong>.
-                </p>
-                {canAnalyzePrediction ? (
-                  <button onClick={handleRunPrediction} className="btn-predict-action mt-2">
-                    ⚡ Run Instant AI Analysis
-                  </button>
-                ) : (
-                  <small style={{ color: "#94a3b8" }}>
-                    Ask an Engineer or Admin to evaluate slope risk.
-                  </small>
-                )}
-              </div>
-            ) : predicting ? (
-              <div className="pred-loading-state">
-                <div className="pred-spinner"></div>
-                <p>Running Physics-Informed ML Failure Assessment...</p>
-              </div>
-            ) : (
-              <div className="pred-content">
-                {/* Primary Risk Status Box */}
-                <div className="risk-display-box" style={{ background: riskInfo.bg, borderColor: riskInfo.color }}>
-                  <div className="risk-badge-large" style={{ color: riskInfo.color }}>
-                    {riskInfo.label}
-                  </div>
-                  <div className="risk-metric-group">
-                    <div className="risk-stat">
-                      <span className="stat-label">Failure Probability</span>
-                      <strong className="stat-value" style={{ color: riskInfo.color }}>
-                        {currentPrediction.riskProbability != null
-                          ? `${Number(currentPrediction.riskProbability).toFixed(1)}%`
-                          : "N/A"}
-                      </strong>
-                    </div>
-
-                    <div className="risk-stat">
-                      <span className="stat-label">Confidence Score</span>
-                      <strong className="stat-value">
-                        {currentPrediction.confidenceScore != null
-                          ? `${Number(currentPrediction.confidenceScore).toFixed(1)}%`
-                          : "95.0%"}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Key Insights & Recommendation */}
-                <div className="pred-details-grid">
-                  <div className="pred-detail-card">
-                    <span className="detail-heading">Recommended Action</span>
-                    <p className="detail-text">
-                      {currentPrediction.recommendation ||
-                        "Maintain routine telemetry sensors and automated surveillance."}
-                    </p>
-                  </div>
-
-                  <div className="pred-detail-card">
-                    <span className="detail-heading">Primary Contributing Factors</span>
-                    <ul className="factors-list">
-                      {currentPrediction.factors && currentPrediction.factors.length > 0 ? (
-                        currentPrediction.factors.map((factor, idx) => (
-                          <li key={idx}>
-                            <span className="factor-bullet">•</span> {factor}
-                          </li>
-                        ))
-                      ) : (
-                        <>
-                          <li><span className="factor-bullet">•</span> Rainfall & Pore Water Saturation</li>
-                          <li><span className="factor-bullet">•</span> Subsurface Moisture Retention</li>
-                        </>
-                      )}
-                    </ul>
-                  </div>
-                </div>
-
-                {/* Prediction Footer Timestamp */}
-                <div className="pred-footer-info">
-                  <span>
-                    🕒 Last Prediction:{" "}
-                    {currentPrediction.predictionTime
-                      ? new Date(currentPrediction.predictionTime).toLocaleString()
-                      : "Just now"}
-                  </span>
-                  {isSimulating && <span className="sim-mode-indicator">Mode: SIMULATION</span>}
-                </div>
-              </div>
-            )}
           </div>
-        </div>
 
-        {/* --- Bottom Compact Row: Real-Time Telemetry Panel --- */}
-        <div className="loc-bottom-row">
+          {/* ========================================================================= */}
+          {/* SECTION 3 — LIVE ENVIRONMENTAL WEATHER & TOPOGRAPHY                       */}
+          {/* ========================================================================= */}
           <div className="loc-panel loc-telemetry-panel">
             <div className="telemetry-bar-header">
               <div className="telemetry-title">
-                <span className="icon">📡</span>
-                <h4>Real-Time Simulated Sensor Data</h4>
-                {isSimulating ? (
-                  <span className="pill-sim-tag active">Simulation Mode Active (3s)</span>
-                ) : (
-                  <span className="pill-sim-tag paused">Simulation Paused</span>
+                <span className="icon">🌿</span>
+                <h4>Live Environmental Weather & Topography</h4>
+                <span className="pill-sim-tag active">
+                  {loadingWeather ? "Fetching Open-Meteo..." : weatherData?.source || "Live Open-Meteo API"}
+                </span>
+                {lastUpdatedTime && (
+                  <span className="pill-sim-tag" style={{ background: "rgba(148, 163, 184, 0.15)", color: "#cbd5e1" }}>
+                    🕒 Updated: {lastUpdatedTime}
+                  </span>
                 )}
               </div>
 
               <div className="site-tag">
-                Location: <strong>{selectedSite?.name || "None"}</strong>
+                Location: <strong>{selectedSite?.name || selectedSite?.siteName || "Current Location"}</strong>
               </div>
             </div>
 
-            {/* Sensor Cards Grid */}
+            {weatherError && (
+              <div className="weather-error-alert">
+                ⚠️ {weatherError}
+              </div>
+            )}
+
+            {/* Weather Metric Cards Grid (8 Real Environmental Parameters) */}
             <div className="sensor-compact-grid">
-              {sensorDisplayList.map((sensor) => (
-                <div key={sensor.id} className="sensor-card-compact">
-                  <div className="sensor-top">
-                    <span className="sensor-icon">{sensor.icon}</span>
-                    <span className="sensor-label">{sensor.label}</span>
+              {/* 1. Rainfall / Precipitation */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">🌧️</span>
+                  <span className="sensor-label">Rainfall</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.rainfall != null ? `${weatherData.rainfall} mm` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.rainfall != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.rainfall != null ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 2. Relative Humidity */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">💧</span>
+                  <span className="sensor-label">Humidity</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.humidity != null ? `${weatherData.humidity}%` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.humidity != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.humidity != null ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 3. Temperature */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">🌡️</span>
+                  <span className="sensor-label">Temperature</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.temperature != null ? `${weatherData.temperature}°C` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.temperature != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.temperature != null ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 4. Weather Condition */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">🌤️</span>
+                  <span className="sensor-label">Condition</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val sensor-val-text" title={weatherData?.condition || "Unavailable"}>
+                    {weatherData?.condition || "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.condition && weatherData?.condition !== "Unavailable" ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.condition && weatherData?.condition !== "Unavailable" ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 5. Wind Speed */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">💨</span>
+                  <span className="sensor-label">Wind Speed</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.windSpeed != null ? `${weatherData.windSpeed} km/h` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.windSpeed != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.windSpeed != null ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 6. Surface Pressure */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">⏲️</span>
+                  <span className="sensor-label">Pressure</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.surfacePressure != null ? `${weatherData.surfacePressure} hPa` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.surfacePressure != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.surfacePressure != null ? "Live Open-Meteo" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 7. Soil Moisture */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">🌱</span>
+                  <span className="sensor-label">Soil Moisture</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.soilMoisture != null ? `${weatherData.soilMoisture}%` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.soilMoisture != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.soilMoisture != null ? "Live 0-7cm" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 8. Elevation */}
+              <div className="sensor-card-compact">
+                <div className="sensor-top">
+                  <span className="sensor-icon">🏔️</span>
+                  <span className="sensor-label">Elevation</span>
+                </div>
+                <div className="sensor-bottom">
+                  <strong className="sensor-val">
+                    {weatherData?.elevation != null ? `${weatherData.elevation} m` : "Unavailable"}
+                  </strong>
+                  <span className={`sensor-badge ${weatherData?.elevation != null ? "badge-safe" : "badge-info"}`}>
+                    {weatherData?.elevation != null ? "DEM Topography" : "Unavailable"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* SECTION 4 — MAIN MONITORING AREA (BALANCED TWO-COLUMN LAYOUT)             */}
+          {/* ========================================================================= */}
+          <div className="loc-dashboard-grid">
+            
+            {/* LEFT COLUMN: AI PREDICTION & RISK ANALYTICS PANEL */}
+            <div className="loc-panel loc-pred-panel">
+              <div className="panel-title-bar">
+                <div className="panel-title">
+                  <span className="icon">🧠</span>
+                  <div>
+                    <h3>AI Landslide Prediction Engine</h3>
+                    <small>Physics & ML Slope Failure Assessment</small>
+                  </div>
+                </div>
+
+                {canAnalyzePrediction && (
+                  <button
+                    type="button"
+                    onClick={handleRunPrediction}
+                    disabled={predicting || !selectedSiteId}
+                    className="btn-predict-action"
+                  >
+                    {predicting ? "Analyzing..." : "⚡ Predict / Analyze"}
+                  </button>
+                )}
+              </div>
+
+              {/* Prediction Body / Empty State */}
+              {!currentPrediction && !predicting ? (
+                <div className="pred-empty-state">
+                  <div className="empty-icon">📊</div>
+                  <h4>No Prediction Evaluated Yet</h4>
+                  <p>
+                    No AI risk evaluation has been computed for{" "}
+                    <strong>{selectedSite?.name || selectedSite?.siteName || "this location"}</strong>.
+                  </p>
+                  {canAnalyzePrediction ? (
+                    <button type="button" onClick={handleRunPrediction} className="btn-predict-action mt-2">
+                      ⚡ Run Instant AI Analysis
+                    </button>
+                  ) : (
+                    <small style={{ color: "#94a3b8" }}>
+                      Ask an Engineer or Admin to evaluate slope risk.
+                    </small>
+                  )}
+                </div>
+              ) : predicting ? (
+                <div className="pred-loading-state">
+                  <div className="pred-spinner"></div>
+                  <p>Running Physics-Informed ML Failure Assessment...</p>
+                </div>
+              ) : (
+                <div className="pred-content">
+                  {/* Primary Risk Status Box */}
+                  <div className="risk-display-box" style={{ background: riskInfo.bg, borderColor: riskInfo.color }}>
+                    <div className="risk-badge-large" style={{ color: riskInfo.color }}>
+                      {riskInfo.label}
+                    </div>
+                    <div className="risk-metric-group">
+                      <div className="risk-stat">
+                        <span className="stat-label">Failure Probability</span>
+                        <strong className="stat-value" style={{ color: riskInfo.color }}>
+                          {currentPrediction.failure_probability != null
+                            ? `${(Number(currentPrediction.failure_probability) * (Number(currentPrediction.failure_probability) <= 1.0 ? 100 : 1)).toFixed(1)}%`
+                            : currentPrediction.riskProbability != null
+                            ? `${Number(currentPrediction.riskProbability).toFixed(1)}%`
+                            : currentPrediction.risk_probability != null
+                            ? `${Number(currentPrediction.risk_probability).toFixed(1)}%`
+                            : currentPrediction.probability != null
+                            ? `${Number(currentPrediction.probability).toFixed(1)}%`
+                            : "0.0%"}
+                        </strong>
+                      </div>
+
+                      <div className="risk-stat">
+                        <span className="stat-label">Confidence Score</span>
+                        <strong className="stat-value">
+                          {currentPrediction.confidenceScore != null
+                            ? `${Number(currentPrediction.confidenceScore).toFixed(1)}%`
+                            : currentPrediction.confidence_score != null
+                            ? `${Number(currentPrediction.confidence_score).toFixed(1)}%`
+                            : currentPrediction.confidence != null
+                            ? `${Number(currentPrediction.confidence).toFixed(1)}%`
+                            : "N/A"}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="sensor-bottom">
-                    <strong className="sensor-val">{sensor.value}</strong>
-                    <span className={`sensor-badge badge-${sensor.statusTone}`}>
-                      {sensor.status}
+                  {/* Key Insights & Recommendation */}
+                  <div className="pred-details-grid">
+                    <div className="pred-detail-card">
+                      <span className="detail-heading">Recommended Action</span>
+                      <p className="detail-text">
+                        {currentPrediction.recommendation ||
+                          "Maintain routine telemetry sensors and automated surveillance."}
+                      </p>
+                    </div>
+
+                    <div className="pred-detail-card">
+                      <span className="detail-heading">Primary Contributing Factors</span>
+                      <ul className="factors-list">
+                        {currentPrediction.factors && currentPrediction.factors.length > 0 ? (
+                          currentPrediction.factors.map((factor, idx) => (
+                            <li key={idx}>
+                              <span className="factor-bullet">•</span> {factor}
+                            </li>
+                          ))
+                        ) : (
+                          <>
+                            <li><span className="factor-bullet">•</span> Rainfall & Pore Water Saturation</li>
+                            <li><span className="factor-bullet">•</span> Subsurface Moisture Retention</li>
+                          </>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Prediction Footer Timestamp */}
+                  <div className="pred-footer-info">
+                    <span>
+                      🕒 Last Prediction:{" "}
+                      {currentPrediction.predictionTime
+                        ? new Date(currentPrediction.predictionTime).toLocaleString()
+                        : "Just now"}
                     </span>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
+
+            {/* RIGHT COLUMN: GPS LOCATION MAP PANEL */}
+            <div className="loc-panel loc-map-panel">
+              <div className="panel-title-bar">
+                <div className="panel-title">
+                  <span className="icon">🗺️</span>
+                  <div>
+                    <h3>GPS Location Map</h3>
+                    <small>Live Geographic Positioning System</small>
+                  </div>
+                </div>
+
+                {/* GPS Actions */}
+                <div className="gps-btn-group">
+                  <button
+                    type="button"
+                    onClick={() => handleUseCurrentGps(false)}
+                    disabled={isAcquiringGps}
+                    className="btn-gps-small"
+                    title="Refresh browser GPS location"
+                  >
+                    📡 {isAcquiringGps ? "Acquiring..." : "Refresh GPS"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Leaflet Map Integration */}
+              <div className="loc-map-container">
+                <MonitoringMap
+                  sites={sites}
+                  filter="ALL"
+                  onSelect={(site) => setSelectedSiteId(site.id)}
+                  clickedCoords={activeMapCoords}
+                />
+              </div>
+
+              {/* GPS Metadata Strip */}
+              <div className="gps-metadata-strip">
+                <div className="gps-meta-item">
+                  <span className="meta-label">Selected Location:</span>
+                  <span className="meta-val">
+                    {selectedSite ? `${selectedSite.latitude?.toFixed(4)}°N, ${selectedSite.longitude?.toFixed(4)}°E` : "None"}
+                  </span>
+                </div>
+
+                <div className="gps-meta-item">
+                  <span className="meta-label">Current GPS Position:</span>
+                  <span className="meta-val">
+                    {userGps.lat != null
+                      ? `${userGps.lat.toFixed(4)}°N, ${userGps.lng.toFixed(4)}°E`
+                      : userGps.status === "DENIED"
+                      ? "Permission Denied"
+                      : userGps.status === "ACQUIRING"
+                      ? "Acquiring..."
+                      : "Unavailable"}
+                  </span>
+                </div>
+
+                <div className="gps-meta-item">
+                  <span className="meta-label">GPS Accuracy:</span>
+                  <span className="meta-val">
+                    {userGps.accuracy != null ? `±${userGps.accuracy} m` : "N/A"}
+                  </span>
+                </div>
+
+                <div className="gps-meta-item">
+                  <span className="meta-label">Distance to Location:</span>
+                  <span className="meta-val highlight-dist">
+                    {computedDistance || "N/A"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
           </div>
+
         </div>
 
         {/* --- Feature 1: Add Location Modal --- */}
@@ -775,7 +991,7 @@ export function LocationMonitoringPage() {
             <div className="modal-card">
               <div className="modal-header">
                 <h3>📍 Add New Monitoring Location</h3>
-                <button onClick={() => setShowAddModal(false)} className="modal-close-btn">&times;</button>
+                <button type="button" onClick={() => setShowAddModal(false)} className="modal-close-btn">&times;</button>
               </div>
 
               <form onSubmit={handleSaveLocation} className="modal-form">
@@ -783,6 +999,7 @@ export function LocationMonitoringPage() {
                   <div className="form-error-alert">{addFormErrors.server}</div>
                 )}
 
+                {/* Location Name (Required) */}
                 <div className="form-group">
                   <label htmlFor="add-name">Location Name *</label>
                   <input
@@ -790,49 +1007,46 @@ export function LocationMonitoringPage() {
                     type="text"
                     placeholder="e.g. Wayanad Hill Slope Site 4"
                     value={addForm.name}
-                    onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                    onChange={(e) => {
+                      setAddForm({ ...addForm, name: e.target.value });
+                      if (addFormErrors.name) setAddFormErrors((prev) => ({ ...prev, name: null }));
+                    }}
                     className={addFormErrors.name ? "input-err" : ""}
                   />
                   {addFormErrors.name && <span className="field-err">{addFormErrors.name}</span>}
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="add-location">Location Address / Description *</label>
-                  <input
-                    id="add-location"
-                    type="text"
-                    placeholder="e.g. NH-766 Highway Corridor, Km 42"
-                    value={addForm.location}
-                    onChange={(e) => setAddForm({ ...addForm, location: e.target.value })}
-                    className={addFormErrors.location ? "input-err" : ""}
-                  />
-                  {addFormErrors.location && <span className="field-err">{addFormErrors.location}</span>}
-                </div>
-
+                {/* Coordinates (2-Column Desktop Layout) */}
                 <div className="form-row">
                   <div className="form-group half">
-                    <label htmlFor="add-lat">Latitude *</label>
+                    <label htmlFor="add-lat">Latitude * (-90 to 90)</label>
                     <input
                       id="add-lat"
                       type="number"
                       step="any"
-                      placeholder="11.3530"
+                      placeholder="e.g. 11.3530"
                       value={addForm.latitude}
-                      onChange={(e) => setAddForm({ ...addForm, latitude: e.target.value })}
+                      onChange={(e) => {
+                        setAddForm({ ...addForm, latitude: e.target.value });
+                        if (addFormErrors.latitude) setAddFormErrors((prev) => ({ ...prev, latitude: null }));
+                      }}
                       className={addFormErrors.latitude ? "input-err" : ""}
                     />
                     {addFormErrors.latitude && <span className="field-err">{addFormErrors.latitude}</span>}
                   </div>
 
                   <div className="form-group half">
-                    <label htmlFor="add-lng">Longitude *</label>
+                    <label htmlFor="add-lng">Longitude * (-180 to 180)</label>
                     <input
                       id="add-lng"
                       type="number"
                       step="any"
-                      placeholder="76.7950"
+                      placeholder="e.g. 76.7950"
                       value={addForm.longitude}
-                      onChange={(e) => setAddForm({ ...addForm, longitude: e.target.value })}
+                      onChange={(e) => {
+                        setAddForm({ ...addForm, longitude: e.target.value });
+                        if (addFormErrors.longitude) setAddFormErrors((prev) => ({ ...prev, longitude: null }));
+                      }}
                       className={addFormErrors.longitude ? "input-err" : ""}
                     />
                     {addFormErrors.longitude && <span className="field-err">{addFormErrors.longitude}</span>}
@@ -843,28 +1057,28 @@ export function LocationMonitoringPage() {
                 <div className="gps-auto-box">
                   <button
                     type="button"
-                    onClick={handleUseGpsInModal}
+                    onClick={() => handleUseCurrentGps(true)}
                     disabled={isAcquiringModalGps}
                     className="btn-gps-auto"
                   >
                     📡 {isAcquiringModalGps ? "Acquiring GPS..." : "Use Current GPS Location"}
                   </button>
-                  <small>Fills latitude and longitude using device GPS sensor</small>
+                  <small>Auto-fills latitude and longitude from device GPS sensor</small>
                 </div>
 
+                {/* Slope Type Selection */}
                 <div className="form-group">
-                  <label htmlFor="add-type">Location Type</label>
+                  <label htmlFor="add-slope-type">Slope Type *</label>
                   <select
-                    id="add-type"
-                    value={addForm.siteType}
-                    onChange={(e) => setAddForm({ ...addForm, siteType: e.target.value })}
+                    id="add-slope-type"
+                    value={addForm.slopeType}
+                    onChange={(e) => setAddForm({ ...addForm, slopeType: e.target.value })}
                   >
-                    <option value="Rock Slope">Rock Slope</option>
-                    <option value="Soil Cut">Soil Cut</option>
-                    <option value="Embankment">Embankment</option>
-                    <option value="Open Pit">Open Pit</option>
-                    <option value="Highway Margin">Highway Margin</option>
-                    <option value="Mining Slope">Mining Slope</option>
+                    <option value="Normal Flat Surface">Normal Flat Surface</option>
+                    <option value="Gentle">Gentle</option>
+                    <option value="Moderate">Moderate</option>
+                    <option value="Steep">Steep</option>
+                    <option value="Very Steep">Very Steep</option>
                   </select>
                 </div>
 

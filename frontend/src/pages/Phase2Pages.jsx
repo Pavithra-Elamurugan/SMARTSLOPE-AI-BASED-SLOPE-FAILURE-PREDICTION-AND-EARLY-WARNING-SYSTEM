@@ -977,6 +977,8 @@ export function MapPage() {
         longitude: lng,
         locationName: label,
         rainfall: weatherData.rainfall,
+        rainfall24h: weatherData.rainfall24h,
+        rainfall72h: weatherData.rainfall72h,
         soilMoisture: weatherData.soilMoisture,
       });
       setInstantPrediction(res);

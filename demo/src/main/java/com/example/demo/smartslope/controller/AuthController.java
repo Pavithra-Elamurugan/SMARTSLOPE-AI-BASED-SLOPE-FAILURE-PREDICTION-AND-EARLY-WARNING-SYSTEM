@@ -36,20 +36,22 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
-        log.info("[AUTH-LOGIN] Request received for email: {}", request.getEmail());
+        String cleanEmail = request.getEmail() != null ? request.getEmail().trim() : "";
+        log.info("[AUTH-LOGIN] LOGIN REQUEST RECEIVED for email: {}", cleanEmail);
+
         try {
-            User user = userRepository.findByEmail(request.getEmail())
-                    .or(() -> userRepository.findByEmail(request.getEmail() != null ? request.getEmail().toLowerCase() : ""))
+            log.info("[AUTH-LOGIN] USER LOOKUP START for email: {}", cleanEmail);
+            User user = userRepository.findByEmail(cleanEmail)
+                    .or(() -> userRepository.findByEmail(cleanEmail.toLowerCase()))
                     .orElseThrow(() -> {
-                        log.warn("[AUTH-LOGIN] User lookup failed for email: {}", request.getEmail());
+                        log.warn("[AUTH-LOGIN] USER LOOKUP FAILED: Email not found: {}", cleanEmail);
                         return new IllegalArgumentException("Invalid email or password");
                     });
-
-            log.info("[AUTH-LOGIN] User lookup successful for id: {}, email: {}, active status: {}, role: {}",
-                    user.getId(), user.getEmail(), user.getActive(), user.getRole());
+            log.info("[AUTH-LOGIN] USER LOOKUP COMPLETE for id: {}, email: {}, role: {}",
+                    user.getId(), user.getEmail(), user.getRole());
 
             if (!Boolean.TRUE.equals(user.getActive())) {
-                log.warn("[AUTH-LOGIN] Login rejected: user active status is false for email: {}", user.getEmail());
+                log.warn("[AUTH-LOGIN] LOGIN REJECTED: User account inactive for email: {}", user.getEmail());
                 Map<String, Object> err = new HashMap<>();
                 err.put("status", HttpStatus.FORBIDDEN.value());
                 err.put("error", "Forbidden");
@@ -57,20 +59,22 @@ public class AuthController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(err);
             }
 
+            log.info("[AUTH-LOGIN] PASSWORD CHECK START for email: {}", user.getEmail());
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(user.getEmail(), request.getPassword())
             );
-            log.info("[AUTH-LOGIN] Authentication manager result: SUCCESS for email: {}", user.getEmail());
+            log.info("[AUTH-LOGIN] PASSWORD CHECK COMPLETE: Success for email: {}", user.getEmail());
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
+            log.info("[AUTH-LOGIN] JWT GENERATION START for email: {}", user.getEmail());
             String jwt = tokenProvider.generateToken(
                     user.getEmail(),
                     user.getRole().name(),
                     user.getName(),
                     user.getId()
             );
-            log.info("[AUTH-LOGIN] JWT generation successful for email: {}", user.getEmail());
+            log.info("[AUTH-LOGIN] JWT GENERATION COMPLETE for email: {}", user.getEmail());
 
             AuthResponse response = AuthResponse.builder()
                     .token(jwt)
@@ -82,9 +86,10 @@ public class AuthController {
                     .tokenType("Bearer")
                     .build();
 
+            log.info("[AUTH-LOGIN] LOGIN RESPONSE SENT for email: {}", user.getEmail());
             return ResponseEntity.ok(response);
         } catch (Exception ex) {
-            log.error("[AUTH-LOGIN] Login failed for email: {}. Exception: {}", request.getEmail(), ex.getMessage());
+            log.error("[AUTH-LOGIN] Login failed for email: {}. Cause: {}", cleanEmail, ex.getMessage());
             Map<String, Object> err = new HashMap<>();
             err.put("status", HttpStatus.UNAUTHORIZED.value());
             err.put("error", "Unauthorized");

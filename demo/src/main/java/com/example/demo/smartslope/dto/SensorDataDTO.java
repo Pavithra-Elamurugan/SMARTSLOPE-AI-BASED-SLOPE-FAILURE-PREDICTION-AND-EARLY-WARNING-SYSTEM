@@ -31,5 +31,13 @@ public class SensorDataDTO {
     private Double crackWidth;
     private Double groundMovement;
 
+    private Double windSpeed;
+    private Double surfacePressure;
+    private Double elevation;
+    private Double slopeAngle;
+    private String soilType;
+    private Double latitude;
+    private Double longitude;
+
     private LocalDateTime recordedAt;
 }

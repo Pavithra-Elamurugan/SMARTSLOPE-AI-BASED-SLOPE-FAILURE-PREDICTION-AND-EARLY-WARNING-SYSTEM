@@ -1,0 +1,26 @@
+{
+  "dataset_name": "NASA GLC & ISRO NRSC Matched Landslide Dataset",
+  "official_source": "NASA Global Landslide Catalog, ISRO NRSC Landslide Atlas of India & ERA5-Land Reanalysis",
+  "total_records": 12000,
+  "class_distribution": {
+    "SAFE": 4000,
+    "MODERATE_RISK": 4000,
+    "HIGH_RISK": 4000
+  },
+  "numeric_features": [
+    "latitude",
+    "longitude",
+    "elevation",
+    "slope_angle",
+    "rainfall",
+    "soil_moisture",
+    "temperature",
+    "humidity",
+    "wind_speed",
+    "pressure"
+  ],
+  "categorical_features": [
+    "soil_type"
+  ],
+  "target_column": "risk_level"
+}

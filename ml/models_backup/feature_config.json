@@ -15,12 +15,12 @@
     "soil_type"
   ],
   "soil_type_categories": [
-    "Residual Soil",
     "Laterite",
-    "Weathered Granite",
     "Colluvium",
+    "Sandy Loam",
+    "Weathered Granite",
     "Clay Loam",
-    "Sandy Loam"
+    "Residual Soil"
   ],
   "target_column": "risk_level",
   "target_classes": [

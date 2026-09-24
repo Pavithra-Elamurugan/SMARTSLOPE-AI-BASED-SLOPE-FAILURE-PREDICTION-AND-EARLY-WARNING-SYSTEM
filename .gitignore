@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Scratch & temporary files
+scratch/
+ml/scratch/
+*.log
+
+# Node dependencies & build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Java / Maven build outputs
+target/
+demo/target/
+.mvn/
+
+# IDE & OS settings
+.vscode/
+.DS_Store
+Thumbs.db

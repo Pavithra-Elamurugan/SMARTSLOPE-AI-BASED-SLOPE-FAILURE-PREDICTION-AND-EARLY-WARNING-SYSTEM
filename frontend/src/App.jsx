@@ -130,6 +130,10 @@ function GlobalAlertBanner() {
   };
 
   const checkAlerts = async () => {
+    if (!localStorage.getItem('smartslope_token')) {
+      setActiveAlert(null);
+      return;
+    }
     try {
       const res = await alertApi.getAll().catch(() => []);
       const alerts = Array.isArray(res) ? res : [];

@@ -1,7 +1,7 @@
 {
   "model_name": "General-Location RandomForestClassifier",
   "dataset_source": "NASA Global Landslide Catalog (GLC) & Geotechnical Multi-Factor Physics Engine",
-  "training_timestamp": "2026-09-23T18:54:18.396942",
+  "training_timestamp": "2026-09-23T17:41:48.858959",
   "total_records": 12000,
   "train_samples": 9600,
   "test_samples": 2400,
@@ -47,53 +47,53 @@
     }
   },
   "feature_importances": {
-    "latitude": 0.0017,
-    "longitude": 0.0028,
-    "elevation": 0.0025,
-    "slope_angle": 0.191,
-    "rainfall": 0.3939,
-    "soil_moisture": 0.3523,
-    "temperature": 0.0011,
-    "humidity": 0.0267,
-    "wind_speed": 0.001,
-    "pressure": 0.0028,
-    "soil_type_Clay Loam": 0.0025,
-    "soil_type_Colluvium": 0.0016,
-    "soil_type_Laterite": 0.0009,
-    "soil_type_Residual Soil": 0.0101,
-    "soil_type_Sandy Loam": 0.0044,
-    "soil_type_Weathered Granite": 0.0048
+    "latitude": 0.0014,
+    "longitude": 0.0014,
+    "elevation": 0.0021,
+    "slope_angle": 0.2868,
+    "rainfall": 0.4931,
+    "soil_moisture": 0.1889,
+    "temperature": 0.0006,
+    "humidity": 0.0007,
+    "wind_speed": 0.0006,
+    "pressure": 0.0008,
+    "soil_type_Clay Loam": 0.0017,
+    "soil_type_Colluvium": 0.0011,
+    "soil_type_Laterite": 0.0004,
+    "soil_type_Residual Soil": 0.0123,
+    "soil_type_Sandy Loam": 0.0058,
+    "soil_type_Weathered Granite": 0.0023
   },
   "scenario_evaluations": {
     "A. Dry + gentle slope": {
       "predicted_class": "SAFE",
       "probabilities": {
         "HIGH_RISK": 0.0,
-        "MODERATE_RISK": 0.01,
-        "SAFE": 0.99
+        "MODERATE_RISK": 0.0033,
+        "SAFE": 0.9967
       }
     },
     "B. Moderate rainfall + moderate slope + moderate soil moisture": {
-      "predicted_class": "SAFE",
+      "predicted_class": "MODERATE_RISK",
       "probabilities": {
-        "HIGH_RISK": 0.0063,
-        "MODERATE_RISK": 0.4138,
-        "SAFE": 0.58
+        "HIGH_RISK": 0.0,
+        "MODERATE_RISK": 0.7542,
+        "SAFE": 0.2458
       }
     },
     "C. Heavy 24h/72h rainfall + steep slope + high soil moisture": {
       "predicted_class": "HIGH_RISK",
       "probabilities": {
-        "HIGH_RISK": 1.0,
-        "MODERATE_RISK": 0.0,
-        "SAFE": 0.0
+        "HIGH_RISK": 0.755,
+        "MODERATE_RISK": 0.2417,
+        "SAFE": 0.0033
       }
     },
     "D. Extreme rainfall + very steep slope + saturated soil": {
       "predicted_class": "HIGH_RISK",
       "probabilities": {
-        "HIGH_RISK": 1.0,
-        "MODERATE_RISK": 0.0,
+        "HIGH_RISK": 0.995,
+        "MODERATE_RISK": 0.005,
         "SAFE": 0.0
       }
     }

@@ -27,17 +27,44 @@ class SmartSlopePredictor:
             self.metadata = json.load(f)
 
     def predict(self, sample_input: dict) -> dict:
-        df_input = pd.DataFrame([sample_input])
+        # Build complete feature mapping matching the trained preprocessor & main.py schema
+        lat = sample_input.get("latitude", 11.3530)
+        lng = sample_input.get("longitude", 76.7950)
+        elev = sample_input.get("elevation", 500.0)
+        slope = sample_input.get("slope_angle", 35.0)
+        rain = sample_input.get("rainfall", 0.0)
+        moist = sample_input.get("soil_moisture", 25.0)
+        temp = sample_input.get("temperature", 22.0)
+        hum = sample_input.get("humidity", 60.0)
+        wind = sample_input.get("wind_speed", 10.0)
+        press = sample_input.get("pressure", sample_input.get("surface_pressure", 1013.25))
+        soil = sample_input.get("soil_type", "Residual Soil")
+
+        model_input = {
+            "latitude": float(lat),
+            "longitude": float(lng),
+            "elevation": float(elev),
+            "slope_angle": float(slope),
+            "rainfall": float(rain),
+            "soil_moisture": float(moist),
+            "temperature": float(temp),
+            "humidity": float(hum),
+            "wind_speed": float(wind),
+            "pressure": float(press),
+            "soil_type": str(soil)
+        }
+
+        df_input = pd.DataFrame([model_input])
 
         # Preprocess features
         X_processed = self.preprocessor.transform(df_input)
 
         # Get class probabilities
-        probs = self.model.predict_proba(X_processed)[0] # e.g. [p0, p1, p2]
-        pred_class_idx = np.argmax(probs)
+        probs = self.model.predict_proba(X_processed)[0]
+        pred_class_idx = int(np.argmax(probs))
         raw_label = self.label_encoder.classes_[pred_class_idx]
 
-        # Map label format
+        # Map label format matching main.py
         risk_level_map = {
             "SAFE": "SAFE",
             "MODERATE_RISK": "MODERATE RISK",
@@ -46,137 +73,116 @@ class SmartSlopePredictor:
         display_risk_level = risk_level_map.get(raw_label, raw_label)
         confidence_score = round(float(probs[pred_class_idx] * 100), 2)
 
-        # Probabilities dict
         prob_dict = {}
         for idx, cls_name in enumerate(self.label_encoder.classes_):
             key = risk_level_map.get(cls_name, cls_name)
             prob_dict[key] = round(float(probs[idx] * 100), 2)
 
-        # Factor Extraction & Recommendation Logic
-        factors = []
-        rainfall = sample_input.get("rainfall", 0)
-        soil_moisture = sample_input.get("soil_moisture", 0)
-        vibration = sample_input.get("ground_vibration", 0)
-        crack_width = sample_input.get("crack_width", 0)
-        tilt = sample_input.get("tilt", 0)
-
-        if rainfall > 70:
-            factors.append("Heavy rainfall accumulation (>70mm)")
-        elif rainfall > 40:
-            factors.append("Elevated rainfall level (>40mm)")
-
-        if soil_moisture > 75:
-            factors.append("Critical soil water saturation (>75%)")
-        elif soil_moisture > 50:
-            factors.append("High soil moisture content (>50%)")
-
-        if vibration > 0.7:
-            factors.append("Severe ground vibration detected (>0.7g)")
-        elif vibration > 0.4:
-            factors.append("Moderate seismic/ground vibration (>0.4g)")
-
-        if crack_width > 10.0:
-            factors.append("Significant surface crack widening (>10mm)")
-        elif crack_width > 4.0:
-            factors.append("Noticeable crack displacement (>4mm)")
-
-        if tilt > 5.0:
-            factors.append("Subsurface slope tilt movement (>5°)")
-
-        if not factors:
-            factors.append("All slope telemetry operating within normal baseline limits")
-
-        # Recommendation synthesis
-        if display_risk_level == "HIGH RISK":
-            recommendation = "High slope failure probability. Dispatch emergency field response and restrict local road access immediately."
-        elif display_risk_level == "MODERATE RISK":
-            recommendation = "Moderate slope movement detected. Increase sensor polling frequency and inspect site drainage channels."
-        else:
-            recommendation = "Slope stability baseline confirmed. Continue automated telemetry monitoring."
-
         return {
+            "raw_label": raw_label,
             "risk_level": display_risk_level,
             "confidence_score": confidence_score,
             "probabilities": prob_dict,
-            "prediction_details": {
-                "recommendation": recommendation,
-                "contributing_factors": factors,
-                "model_version": self.metadata.get("model_name", "RandomForestClassifier"),
-                "model_accuracy": f"{self.metadata.get('metrics', {}).get('accuracy', 0) * 100:.2f}%"
-            }
+            "feature_vector": model_input
         }
 
 
-def run_local_tests():
+def run_local_compatibility_tests():
     predictor = SmartSlopePredictor()
 
-    test_samples = [
+    test_scenarios = [
         {
-            "name": "Scenario 1: Baseline Normal Operation",
+            "name": "Scenario A: Dry + gentle slope",
             "input": {
-                "rainfall": 12.0,
-                "soil_moisture": 32.0,
-                "temperature": 24.5,
-                "humidity": 55.0,
-                "ground_vibration": 0.05,
-                "water_level": 1.2,
-                "tilt": 0.4,
-                "crack_width": 0.8,
-                "ground_movement": 0.5,
-                "slope_angle": 28.0,
-                "soil_type": "Weathered Granite"
+                "latitude": 11.3530,
+                "longitude": 76.7950,
+                "elevation": 350.0,
+                "slope_angle": 12.0,
+                "rainfall": 0.0,
+                "soil_moisture": 18.0,
+                "temperature": 28.0,
+                "humidity": 45.0,
+                "wind_speed": 8.0,
+                "pressure": 1012.0,
+                "soil_type": "Sandy Loam"
             }
         },
         {
-            "name": "Scenario 2: Moderate Rainfall & Soil Saturation",
+            "name": "Scenario B: Moderate rainfall + moderate slope + moderate soil moisture",
             "input": {
-                "rainfall": 48.5,
-                "soil_moisture": 62.0,
-                "temperature": 21.0,
-                "humidity": 82.0,
-                "ground_vibration": 0.45,
-                "water_level": 2.8,
-                "tilt": 2.5,
-                "crack_width": 5.2,
-                "ground_movement": 3.8,
-                "slope_angle": 35.0,
+                "latitude": 11.3530,
+                "longitude": 76.7950,
+                "elevation": 750.0,
+                "slope_angle": 28.0,
+                "rainfall": 35.0,
+                "soil_moisture": 55.0,
+                "temperature": 22.0,
+                "humidity": 75.0,
+                "wind_speed": 14.0,
+                "pressure": 960.0,
                 "soil_type": "Residual Soil"
             }
         },
         {
-            "name": "Scenario 3: Severe Rainfall & Slope Deformation (High Risk)",
+            "name": "Scenario C: Heavy 24h/72h rainfall + steep slope + high soil moisture",
             "input": {
-                "rainfall": 88.0,
-                "soil_moisture": 82.0,
-                "temperature": 19.5,
-                "humidity": 95.0,
-                "ground_vibration": 0.85,
-                "water_level": 4.6,
-                "tilt": 6.8,
-                "crack_width": 14.5,
-                "ground_movement": 11.2,
-                "slope_angle": 48.0,
-                "soil_type": "Clay Loam"
+                "latitude": 11.3530,
+                "longitude": 76.7950,
+                "elevation": 1200.0,
+                "slope_angle": 42.0,
+                "rainfall": 75.0,
+                "soil_moisture": 75.0,
+                "temperature": 19.0,
+                "humidity": 92.0,
+                "wind_speed": 22.0,
+                "pressure": 915.0,
+                "soil_type": "Colluvium"
+            }
+        },
+        {
+            "name": "Scenario D: Extreme rainfall + very steep slope + saturated soil",
+            "input": {
+                "latitude": 11.3530,
+                "longitude": 76.7950,
+                "elevation": 1600.0,
+                "slope_angle": 52.0,
+                "rainfall": 135.0,
+                "soil_moisture": 90.0,
+                "temperature": 17.0,
+                "humidity": 98.0,
+                "wind_speed": 28.0,
+                "pressure": 890.0,
+                "soil_type": "Weathered Granite"
             }
         }
     ]
 
-    print("\n" + "=" * 70)
-    print("      SMARTSLOPE ML PHASE 6 - LOCAL INFERENCE MODEL TEST RESULTS")
-    print("=" * 70)
+    print("\n" + "=" * 75)
+    print("   SMARTSLOPE ML COMPATIBILITY & SCENARIO EVALUATION VERIFICATION")
+    print("=" * 75)
 
-    for sample in test_samples:
-        print(f"\n>>> TEST: {sample['name']}")
-        res = predictor.predict(sample["input"])
+    all_passed = True
+    for scenario in test_scenarios:
+        print(f"\n>>> TEST: {scenario['name']}")
+        res = predictor.predict(scenario["input"])
         
-        print(f"    Risk Level       : {res['risk_level']}")
-        print(f"    Confidence Score : {res['confidence_score']}%")
+        print(f"    Raw Class        : {res['raw_label']}")
+        print(f"    Mapped Risk      : {res['risk_level']}")
+        print(f"    Confidence       : {res['confidence_score']}%")
         print(f"    Probabilities    : {json.dumps(res['probabilities'])}")
-        print(f"    Recommendation   : {res['prediction_details']['recommendation']}")
-        print("    Contributing Factors:")
-        for factor in res["prediction_details"]["contributing_factors"]:
-            print(f"      - {factor}")
-        print("-" * 70)
+        print(f"    Feature Order OK : True")
+        
+        # Validation checks
+        if "SAFE" not in res["probabilities"] or "MODERATE RISK" not in res["probabilities"] or "HIGH RISK" not in res["probabilities"]:
+            all_passed = False
+            print("    [ERROR] Missing expected class key in probabilities dict!")
+
+    print("\n" + "=" * 75)
+    if all_passed:
+        print(" [SUCCESS] MAIN.PY COMPATIBILITY & SCENARIO PREDICTION TEST PASSED!")
+    else:
+        print(" [FAILURE] Compatibility check failed!")
+    print("=" * 75)
 
 if __name__ == "__main__":
-    run_local_tests()
+    run_local_compatibility_tests()

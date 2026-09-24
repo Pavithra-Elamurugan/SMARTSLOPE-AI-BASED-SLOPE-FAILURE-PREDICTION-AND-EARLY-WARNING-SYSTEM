@@ -47,16 +47,18 @@ export function AuthProvider({ children }) {
         role: data.role,
         requestedRole: data.requestedRole,
       };
-      setToken(data.token);
-      setUser(userObj);
       localStorage.setItem("smartslope_token", data.token);
       localStorage.setItem("smartslope_user", JSON.stringify(userObj));
+      setToken(data.token);
+      setUser(userObj);
       return userObj;
     } catch (err) {
       const serverErr = err.response?.data;
-      const msg = typeof serverErr === "string" 
+      const msg = err.customMessage 
+        ? err.customMessage
+        : typeof serverErr === "string" 
         ? serverErr 
-        : serverErr?.message || "Invalid email or password";
+        : serverErr?.message || err.message || "Invalid email or password";
       setError(msg);
       throw err;
     } finally {

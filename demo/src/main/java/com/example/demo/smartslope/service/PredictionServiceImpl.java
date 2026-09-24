@@ -158,27 +158,42 @@ public class PredictionServiceImpl implements PredictionService {
         checkSiteOwnership(site);
 
         Double rainfall = 0.0;
-        Double soilMoisture = 0.0;
-        Double temperature = 25.0;
-        Double humidity = 65.0;
-        Double vibration = 0.0;
-        Double waterLevel = 2.0;
-        Double tilt = 0.0;
-        Double crackWidth = 0.0;
-        Double groundMovement = 0.0;
-        Double slopeAngle = site.getSlopeAngle() != null ? site.getSlopeAngle() : 35.0;
-        String soilType = site.getSoilType() != null ? site.getSoilType() : "Residual Soil";
+        Double soilMoisture = null;
+        Double temperature = null;
+        Double humidity = null;
+        Double windSpeed = null;
+        Double surfacePressure = null;
+        Double elevation = site.getElevation();
+        Double slopeAngle = site.getSlopeAngle();
+        String soilType = site.getSoilType();
+        Double latitude = site.getLatitude();
+        Double longitude = site.getLongitude();
+        Double tilt = 0.1;
+        Double vibration = 0.01;
+        Double crackWidth = 0.2;
+        Double waterLevel = 1.5;
+        Double groundMovement = 0.1;
         Long validSensorId;
 
         if (customSensorData != null) {
-            rainfall = customSensorData.getRainfall() != null ? customSensorData.getRainfall() : 10.0;
-            soilMoisture = customSensorData.getSoilMoisture() != null ? customSensorData.getSoilMoisture() : 30.0;
-            temperature = customSensorData.getTemperature() != null ? customSensorData.getTemperature() : 25.0;
-            humidity = customSensorData.getHumidity() != null ? customSensorData.getHumidity() : 65.0;
-            crackWidth = customSensorData.getCrackWidth() != null ? customSensorData.getCrackWidth() : (waterLevel * 2.1);
-            groundMovement = customSensorData.getGroundMovement() != null ? customSensorData.getGroundMovement() : 1.0;
+            if (customSensorData.getRainfall() != null) rainfall = customSensorData.getRainfall();
+            if (customSensorData.getSoilMoisture() != null) soilMoisture = customSensorData.getSoilMoisture();
+            if (customSensorData.getTemperature() != null) temperature = customSensorData.getTemperature();
+            if (customSensorData.getHumidity() != null) humidity = customSensorData.getHumidity();
+            if (customSensorData.getGroundVibration() != null) vibration = customSensorData.getGroundVibration();
+            if (customSensorData.getWaterLevel() != null) waterLevel = customSensorData.getWaterLevel();
+            if (customSensorData.getTilt() != null) tilt = customSensorData.getTilt();
+            if (customSensorData.getCrackWidth() != null) crackWidth = customSensorData.getCrackWidth();
+            if (customSensorData.getGroundMovement() != null) groundMovement = customSensorData.getGroundMovement();
 
-            // Save custom sensor reading in sensor_data table to maintain foreign key integrity
+            if (customSensorData.getWindSpeed() != null) windSpeed = customSensorData.getWindSpeed();
+            if (customSensorData.getSurfacePressure() != null) surfacePressure = customSensorData.getSurfacePressure();
+            if (customSensorData.getElevation() != null) elevation = customSensorData.getElevation();
+            if (customSensorData.getSlopeAngle() != null) slopeAngle = customSensorData.getSlopeAngle();
+            if (customSensorData.getSoilType() != null) soilType = customSensorData.getSoilType();
+            if (customSensorData.getLatitude() != null) latitude = customSensorData.getLatitude();
+            if (customSensorData.getLongitude() != null) longitude = customSensorData.getLongitude();
+
             SensorData newSensorData = SensorData.builder()
                     .monitoringSite(site)
                     .siteId(site.getId())
@@ -204,31 +219,35 @@ public class PredictionServiceImpl implements PredictionService {
 
         FastApiPredictionRequest fastApiRequest = FastApiPredictionRequest.builder()
                 .monitoringSiteId(siteId)
+                .latitude(latitude)
+                .longitude(longitude)
+                .elevation(elevation)
+                .slopeAngle(slopeAngle)
+                .soilType(soilType)
                 .rainfall(rainfall)
                 .soilMoisture(soilMoisture)
                 .temperature(temperature)
                 .humidity(humidity)
+                .windSpeed(windSpeed)
+                .surfacePressure(surfacePressure)
                 .groundVibration(vibration)
                 .waterLevel(waterLevel)
                 .tilt(tilt)
                 .crackWidth(crackWidth)
                 .groundMovement(groundMovement)
-                .slopeAngle(slopeAngle)
-                .soilType(soilType)
                 .build();
 
-        RiskLevel riskLevel = RiskLevel.SAFE;
-        double confidence = 90.0;
-        double riskProbability = 5.0;
-        String recommendation = "Baseline slope monitoring.";
+        RiskLevel riskLevel;
+        double confidence;
+        double riskProbability;
+        String recommendation;
         List<String> factors = new ArrayList<>();
         List<Integer> probabilities = Arrays.asList(95, 4, 1);
 
-        boolean fastApiSuccess = false;
         try {
             SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-            requestFactory.setConnectTimeout(3000);
-            requestFactory.setReadTimeout(3000);
+            requestFactory.setConnectTimeout(4000);
+            requestFactory.setReadTimeout(4000);
 
             RestTemplate restTemplate = new RestTemplate(requestFactory);
             String mlUrl = "http://localhost:8000/predict";
@@ -239,67 +258,38 @@ public class PredictionServiceImpl implements PredictionService {
             HttpEntity<FastApiPredictionRequest> entity = new HttpEntity<>(fastApiRequest, headers);
             FastApiPredictionResponse response = restTemplate.postForObject(mlUrl, entity, FastApiPredictionResponse.class);
 
-            if (response != null && response.getRiskLevel() != null) {
-                fastApiSuccess = true;
-                confidence = response.getConfidenceScore() != null ? response.getConfidenceScore() : 90.0;
-                riskProbability = response.getRiskProbability() != null ? response.getRiskProbability() : 5.0;
+            if (response == null || response.getRiskLevel() == null) {
+                throw new IllegalStateException("FastAPI prediction response is null or invalid.");
+            }
 
-                String returnedRiskStr = response.getRiskLevel().toUpperCase();
-                if (returnedRiskStr.contains("HIGH")) {
-                    riskLevel = RiskLevel.HIGH_RISK;
-                } else if (returnedRiskStr.contains("MODERATE")) {
-                    riskLevel = RiskLevel.MODERATE_RISK;
-                } else {
-                    riskLevel = RiskLevel.SAFE;
-                }
+            confidence = response.getConfidenceScore() != null ? response.getConfidenceScore() : 90.0;
+            riskProbability = response.getRiskProbability() != null ? response.getRiskProbability() : 5.0;
 
-                recommendation = response.getRecommendation() != null ? response.getRecommendation() : "Evaluated via FastAPI ML model.";
+            String returnedRiskStr = response.getRiskLevel().toUpperCase();
+            if (returnedRiskStr.contains("HIGH")) {
+                riskLevel = RiskLevel.HIGH_RISK;
+            } else if (returnedRiskStr.contains("MODERATE")) {
+                riskLevel = RiskLevel.MODERATE_RISK;
+            } else {
+                riskLevel = RiskLevel.SAFE;
+            }
 
-                if (response.getContributingFactors() != null && !response.getContributingFactors().isEmpty()) {
-                    factors = response.getContributingFactors();
-                }
+            recommendation = response.getRecommendation() != null ? response.getRecommendation() : "Evaluated via General-Location AI model.";
 
-                if (response.getProbabilities() != null) {
-                    double pSafe = response.getProbabilities().getOrDefault("SAFE", 0.0);
-                    double pMod = response.getProbabilities().getOrDefault("MODERATE RISK", 0.0);
-                    double pHigh = response.getProbabilities().getOrDefault("HIGH RISK", 0.0);
-                    probabilities = Arrays.asList((int) Math.round(pSafe), (int) Math.round(pMod), (int) Math.round(pHigh));
-                }
+            if (response.getContributingFactors() != null && !response.getContributingFactors().isEmpty()) {
+                factors = response.getContributingFactors();
+            }
+
+            if (response.getProbabilities() != null) {
+                double pSafe = response.getProbabilities().getOrDefault("SAFE", 0.0);
+                double pMod = response.getProbabilities().getOrDefault("MODERATE RISK", 0.0);
+                double pHigh = response.getProbabilities().getOrDefault("HIGH RISK", 0.0);
+                probabilities = Arrays.asList((int) Math.round(pSafe), (int) Math.round(pMod), (int) Math.round(pHigh));
             }
         } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(PredictionServiceImpl.class)
-                    .warn("[WARN] FastAPI ML service unreachable on http://localhost:8000/predict. Executing rule engine fallback. Error: {}", e.getMessage());
-        }
-
-        if (!fastApiSuccess) {
-            if (rainfall > 70 || soilMoisture > 75 || vibration > 0.7 || crackWidth > 10.0) {
-                riskLevel = RiskLevel.HIGH_RISK;
-                confidence = 86.0;
-                riskProbability = Math.min(98.5, 75.0 + (rainfall * 0.15) + (soilMoisture * 0.1));
-                recommendation = "High landslide probability. Implement traffic restrictions and deploy field team immediately.";
-                if (rainfall > 70) factors.add("Heavy rainfall detected (>70mm)");
-                if (soilMoisture > 75) factors.add("High soil saturation (>75%)");
-                if (vibration > 0.7) factors.add("Elevated ground vibration");
-                if (crackWidth > 10.0) factors.add("Significant crack widening observed");
-                probabilities = Arrays.asList(5, 15, 80);
-            } else if (rainfall > 40 || soilMoisture > 50 || vibration > 0.4 || crackWidth > 4.0) {
-                riskLevel = RiskLevel.MODERATE_RISK;
-                confidence = 74.0;
-                riskProbability = Math.min(68.5, 45.0 + (rainfall * 0.3) + (soilMoisture * 0.2));
-                recommendation = "Moderate movement detected. Increase sensor polling rate and monitor drainage channels.";
-                if (rainfall > 40) factors.add("Moderate rainfall accumulation");
-                if (soilMoisture > 50) factors.add("Elevated soil moisture content");
-                if (vibration > 0.4) factors.add("Noticeable seismic/ground vibration");
-                probabilities = Arrays.asList(20, 60, 20);
-            } else {
-                riskLevel = RiskLevel.SAFE;
-                confidence = 95.0;
-                riskProbability = Math.max(1.5, (rainfall * 0.3) + (soilMoisture * 0.2) + (tilt * 2.0));
-                recommendation = "All slope sensors operating within baseline safety limits.";
-                factors.add("Stable ground movement");
-                factors.add("Normal environmental moisture");
-                probabilities = Arrays.asList(95, 4, 1);
-            }
+                    .error("[ERROR] FastAPI ML prediction service unreachable on http://localhost:8000/predict: {}", e.getMessage());
+            throw new IllegalStateException("FastAPI ML prediction service is offline or unreachable at http://localhost:8000/predict. Please start the Python FastAPI server.", e);
         }
 
         // Diagnostic backend logging
