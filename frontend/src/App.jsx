@@ -10,7 +10,6 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import InspectionsPage from "./pages/InspectionsPage";
-import PredictionPage from "./pages/PredictionPage";
 import { alertApi } from "./services/api";
 import "./App.css";
 
@@ -393,14 +392,6 @@ export default function App() {
               }
             />
             <Route
-              path="/predictions"
-              element={
-                <ProtectedRoute allowedRoles={["ADMIN", "ENGINEER"]}>
-                  <PredictionPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/admin/users"
               element={
                 <ProtectedRoute allowedRoles={["ADMIN"]}>
@@ -410,6 +401,7 @@ export default function App() {
             />
 
             {/* LEGACY REDIRECTS */}
+            <Route path="/predictions" element={<Navigate to="/location-monitoring" replace />} />
             <Route path="/sites" element={<Navigate to="/location-monitoring" replace />} />
             <Route path="/sensors" element={<Navigate to="/location-monitoring" replace />} />
             <Route path="/incidents" element={<Navigate to="/dashboard" replace />} />

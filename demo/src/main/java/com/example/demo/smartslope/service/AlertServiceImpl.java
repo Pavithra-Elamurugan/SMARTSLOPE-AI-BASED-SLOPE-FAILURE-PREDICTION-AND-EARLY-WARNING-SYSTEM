@@ -130,19 +130,57 @@ public class AlertServiceImpl implements AlertService {
         Prediction p = alert.getPrediction();
         Long siteId = null;
         String siteName = null;
-        String severity = alert.getAlertType();
+        Double lat = null;
+        Double lng = null;
+        Double riskProb = null;
+        Double confScore = null;
+        String recommendation = null;
+        java.util.List<String> factorsList = new java.util.ArrayList<>();
 
-        if (p != null && p.getMonitoringSite() != null) {
-            siteId = p.getMonitoringSite().getId();
-            siteName = p.getMonitoringSite().getSiteName();
+        String severity = alert.getAlertType();
+        if (alert.getSeverity() != null && !alert.getSeverity().isBlank()) {
+            severity = alert.getSeverity();
         }
 
-        if ("HIGH".equalsIgnoreCase(severity) || "CRITICAL".equalsIgnoreCase(severity)) {
+        if (p != null) {
+            riskProb = p.getProbability() != null ? p.getProbability() : p.getRiskScore();
+            confScore = p.getConfidenceScore();
+            recommendation = p.getRecommendation();
+
+            if (p.getMonitoringSite() != null) {
+                siteId = p.getMonitoringSite().getId();
+                siteName = p.getMonitoringSite().getSiteName();
+                lat = p.getMonitoringSite().getLatitude();
+                lng = p.getMonitoringSite().getLongitude();
+            } else if (p.getSiteId() != null) {
+                siteId = p.getSiteId();
+            }
+        }
+
+        if (siteId == null) {
+            siteId = alert.getSiteId();
+        }
+
+        if ("HIGH".equalsIgnoreCase(severity) || "CRITICAL".equalsIgnoreCase(severity) || "HIGH_RISK".equalsIgnoreCase(severity)) {
             severity = "CRITICAL";
-        } else if ("MODERATE".equalsIgnoreCase(severity) || "WARNING".equalsIgnoreCase(severity)) {
+        } else if ("MODERATE".equalsIgnoreCase(severity) || "WARNING".equalsIgnoreCase(severity) || "MODERATE_RISK".equalsIgnoreCase(severity)) {
             severity = "WARNING";
         } else {
             severity = "INFORMATION";
+        }
+
+        // Parse risk factors from message if available
+        if (alert.getMessage() != null && !alert.getMessage().isBlank()) {
+            String msg = alert.getMessage();
+            if (msg.contains(".")) {
+                String[] parts = msg.split("\\.");
+                for (String part : parts) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty() && !trimmed.toLowerCase().contains("detected at")) {
+                        factorsList.add(trimmed);
+                    }
+                }
+            }
         }
 
         return AlertDTO.builder()
@@ -155,6 +193,12 @@ public class AlertServiceImpl implements AlertService {
             .message(alert.getMessage())
             .status(alert.getStatus())
             .sentAt(alert.getSentAt())
+            .riskProbability(riskProb)
+            .confidenceScore(confScore)
+            .recommendation(recommendation)
+            .latitude(lat)
+            .longitude(lng)
+            .factors(factorsList)
             .build();
     }
 }

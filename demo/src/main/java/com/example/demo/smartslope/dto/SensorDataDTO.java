@@ -22,6 +22,8 @@ public class SensorDataDTO {
     private Long monitoringSiteId;
 
     private Double rainfall;
+    private Double rainfall24h;
+    private Double rainfall72h;
     private Double soilMoisture;
     private Double temperature;
     private Double humidity;

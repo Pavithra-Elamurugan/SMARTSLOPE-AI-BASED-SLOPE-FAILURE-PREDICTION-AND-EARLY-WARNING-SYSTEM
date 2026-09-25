@@ -158,12 +158,12 @@ public class PredictionServiceImpl implements PredictionService {
         checkSiteOwnership(site);
 
         Double rainfall = 0.0;
-        Double soilMoisture = null;
-        Double temperature = null;
-        Double humidity = null;
-        Double windSpeed = null;
-        Double surfacePressure = null;
-        Double elevation = site.getElevation();
+        Double soilMoisture = 35.0;
+        Double temperature = 25.0;
+        Double humidity = 65.0;
+        Double windSpeed = 10.0;
+        Double surfacePressure = 1013.0;
+        Double elevation = 500.0;
         Double slopeAngle = site.getSlopeAngle();
         String soilType = site.getSoilType();
         Double latitude = site.getLatitude();
@@ -217,6 +217,9 @@ public class PredictionServiceImpl implements PredictionService {
             validSensorId = getOrCreateSensorDataId(site, null);
         }
 
+        Double rainfall24h = (customSensorData != null && customSensorData.getRainfall24h() != null) ? customSensorData.getRainfall24h() : null;
+        Double rainfall72h = (customSensorData != null && customSensorData.getRainfall72h() != null) ? customSensorData.getRainfall72h() : null;
+
         FastApiPredictionRequest fastApiRequest = FastApiPredictionRequest.builder()
                 .monitoringSiteId(siteId)
                 .latitude(latitude)
@@ -225,6 +228,10 @@ public class PredictionServiceImpl implements PredictionService {
                 .slopeAngle(slopeAngle)
                 .soilType(soilType)
                 .rainfall(rainfall)
+                .rainfall24h(rainfall24h)
+                .rainfall24hAlias(rainfall24h)
+                .rainfall72h(rainfall72h)
+                .rainfall72hAlias(rainfall72h)
                 .soilMoisture(soilMoisture)
                 .temperature(temperature)
                 .humidity(humidity)

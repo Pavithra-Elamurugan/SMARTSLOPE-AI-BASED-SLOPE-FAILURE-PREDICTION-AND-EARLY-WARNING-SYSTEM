@@ -11,7 +11,7 @@ export default function Sidebar({ collapsed, onToggle }) {
       return true; // All 6 pages
     }
     if (role === "ENGINEER") {
-      return ["/dashboard", "/location-monitoring", "/alerts", "/inspections", "/predictions"].includes(item.to);
+      return ["/dashboard", "/location-monitoring", "/alerts", "/inspections"].includes(item.to);
     }
     if (role === "SAFETY_OFFICER") {
       return ["/dashboard", "/location-monitoring", "/alerts", "/inspections"].includes(item.to);

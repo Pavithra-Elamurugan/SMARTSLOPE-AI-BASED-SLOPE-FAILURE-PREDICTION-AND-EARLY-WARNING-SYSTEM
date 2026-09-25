@@ -17,6 +17,18 @@ public class FastApiPredictionRequest {
 
     private Double rainfall;
 
+    @JsonProperty("rainfall24h")
+    private Double rainfall24h;
+
+    @JsonProperty("rainfall_24h")
+    private Double rainfall24hAlias;
+
+    @JsonProperty("rainfall72h")
+    private Double rainfall72h;
+
+    @JsonProperty("rainfall_72h")
+    private Double rainfall72hAlias;
+
     @JsonProperty("soil_moisture")
     private Double soilMoisture;
 
